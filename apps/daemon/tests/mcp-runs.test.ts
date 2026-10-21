@@ -73,7 +73,7 @@ describe('public MCP discovery + generation tools', () => {
     expect(() => validateMcpToolArgs('start_run', { reasoning })).toThrow(/PLUGIN_CONTRACT_REJECTED/u);
   });
 
-  it.each(['medium', 'default'])('start_run forwards explicit reasoning %s to the runner', async (reasoning) => {
+  it.each(['medium', 'high', 'xhigh', 'default'])('start_run forwards explicit reasoning %s to the runner', async (reasoning) => {
     const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
       if (url.endsWith('/api/projects')) {
         return new Response(JSON.stringify({ projects: [{ id: 'project-1', name: 'Demo' }] }), { status: 200 });
@@ -86,7 +86,7 @@ describe('public MCP discovery + generation tools', () => {
     vi.stubGlobal('fetch', withDirectory(fetchMock));
 
     const result = await handleMcpToolCall('http://127.0.0.1:17456', 'start_run', {
-      project: 'Demo',
+      project: '11111111-1111-4111-8111-111111111111',
       prompt: 'Create a disposable counter page',
       agent: 'codex',
       model: 'gpt-6.1-sol',
@@ -118,7 +118,7 @@ describe('public MCP discovery + generation tools', () => {
     vi.stubGlobal('fetch', withDirectory(fetchMock));
 
     const result = await handleMcpToolCall('http://127.0.0.1:17456', 'start_run', {
-      project: 'Demo',
+      project: '11111111-1111-4111-8111-111111111111',
       prompt: 'Create a disposable counter page',
       agent: 'codex',
       ...(reasoning === undefined ? {} : { reasoning }),

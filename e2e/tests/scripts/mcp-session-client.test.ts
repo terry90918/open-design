@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import test from 'node:test';
-import { McpSessionClient } from './mcp-session-client.ts';
+import { test } from 'vitest';
+import { McpSessionClient } from '../../../scripts/mcp-session-client.ts';
 
 const server = `
 const readline = require('node:readline');
@@ -46,8 +46,8 @@ test('correlates concurrent responses while ignoring notifications', async () =>
       client.callTool('echo', { value: 'first', delay: 20 }),
       client.callTool('echo', { value: 'second' }),
     ]);
-    assert.equal(results[0].value, 'first');
-    assert.equal(results[1].value, 'second');
+    assert.equal(results[0]?.value, 'first');
+    assert.equal(results[1]?.value, 'second');
   } finally {
     await client.close();
   }
