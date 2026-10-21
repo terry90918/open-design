@@ -81,3 +81,7 @@ The first integration assertion incorrectly expected a top-level reasoning field
 The first guard identified a test-layout violation; client coverage was moved into `e2e/tests/scripts/` and revalidated. The first focused suite identified fixture cache interference from the new tests; those cases now use UUID project references and preserve the pre-existing name-resolution oracle. These corrections changed tests only.
 
 The test runtime is disposable; retain curated results and stop only its tools-dev namespace. The signed-runtime artifact and the source patch remain separate deliverables. A captured fake-CLI effort proves parameter transport, not high-effort model quality or a new production installation.
+
+## Real generation through this fork
+
+A subsequent explicitly requested acceptance used the fork's own MCP, daemon, and runner with the real installed Codex CLI, not the signed production runtime or a fake CLI. It completed brief confirmation, one explicit Sol 6.1/low run, terminal polling, untruncated artifact readback, Mac Chrome interaction, reload, and interaction after reload. See [fork real Local Codex acceptance](fork-local-codex-acceptance.md) for the exact execution commit, binary/source identities, run, artifact hash, browser observations, and the protected CLI-log evidence boundary.
