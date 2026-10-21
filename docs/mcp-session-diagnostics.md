@@ -33,11 +33,23 @@ Baseline source: `3b0df90f305c8279e748c292accf336d02b924ef` (package 0.25.1). In
 
 The stored UI preference alone therefore cannot establish that an MCP-started run uses medium. No run was started to claim an effective engine configuration. Inherited daemon environment, project configuration, and model-specific defaults can affect CLI resolution; those are not proved by reading the root preference. No settings, credentials, or trust state were changed to force a result.
 
-## Narrow next product change, if approved for runtime validation
+## Source change awaiting runtime validation
 
-An explicit MCP reasoning selector could be added to the advertised schema and forwarded to the existing run request reasoning field, reusing the existing runtime validation and adapter mapping. This would be a new MCP capability, not a fix for missing host tool injection. A focused schema/forwarding regression should precede it; model/effort acceptance and a disposable Local Codex generation must then be verified on an isolated runtime.
+The fork now adds an optional `reasoning` string to the MCP `start_run` schema and forwards a nonempty value to the existing run request reasoning field. No shared DTO, HTTP API, CLI adapter, default preference, or security setting is changed. Existing API/runtime reasoning support is reused; CLI surface parity does not require a new command for this MCP-only forwarding change.
 
-Executing a custom runtime requires a separately reviewed isolated-build plan: supported Node/pnpm and dependencies, namespaced disposable data, separate ports, no MCP re-registration, no replacement of the signed installation, and no changes to trust or security permissions. No custom build was installed or started for this investigation.
+There is no global enum: runtime/model options differ and can be discovered dynamically. The existing runner remains responsible for validating the selected runtime/model effort. An omitted or empty string is not forwarded; explicit `default` is forwarded for the existing runner/adapter default handling. Existing callers therefore retain their previous behavior.
+
+Nine focused regression cases were added to `apps/daemon/tests/mcp-runs.test.ts`: optional string schema and runtime-boundary acceptance, four non-string rejection cases, forwarding medium/default, and omitted/empty default preservation. These are authored tests, not reported as executed or passing. They must run with the installed dependency toolchain before the branch is ready:
+
+```sh
+pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts tests/mcp-runs.test.ts
+pnpm guard
+pnpm typecheck
+```
+
+The changed source and test files passed Node 24 syntax-only `--experimental-strip-types --check` and `git diff --check`. These checks neither resolve imports nor typecheck code. A model/effort acceptance check and disposable Local Codex generation remain pending on an isolated runtime. This change does not fix missing host tool injection.
+
+Executing a custom runtime requires a separately reviewed isolated-build plan: supported Node/pnpm and dependencies, namespaced disposable data, separate ports, no MCP re-registration, no replacement of the signed installation, and no changes to trust or security permissions. No custom build was installed or started for this investigation. Approval for isolated dependencies/build/runtime execution remains pending.
 
 ## Validation limits
 
