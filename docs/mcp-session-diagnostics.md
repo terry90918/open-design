@@ -1,6 +1,6 @@
 # MCP session diagnostics
 
-This fork adds an opt-in diagnostic client, not a daemon or desktop fix. It uses the existing `codex mcp get open-design --json` stdio registration without changing it. It does not install software, select an execution mode, collect a brief, start a run, retry a timed-out request, or print registration environment values automatically.
+This fork adds an opt-in diagnostic client and an optional MCP reasoning selector. It does not fix native host tool injection or desktop automation. It uses the existing `codex mcp get open-design --json` stdio registration without changing it. It does not install software, select an execution mode, collect a brief, start a run, retry a timed-out request, or print registration environment values automatically.
 
 ## Keep a workflow on one connection
 
@@ -15,7 +15,7 @@ The unaccepted workflow and brief draft are session-owned. In the installed runt
 Use the repository's required Node 24 runtime:
 
 ```sh
-node --experimental-strip-types --test scripts/mcp-session-client.test.ts
+pnpm --filter @open-design/e2e test tests/scripts/mcp-session-client.test.ts
 ```
 
 The tests use subprocess fixtures, never the user's design projects. They cover workflow ownership across connections, interleaved replies and notifications, uncertain timeouts without automatic retry, child exit, and protocol errors versus tool error results.
@@ -33,13 +33,13 @@ Baseline source: `3b0df90f305c8279e748c292accf336d02b924ef` (package 0.25.1). In
 
 The stored UI preference alone therefore cannot establish that an MCP-started run uses medium. No run was started to claim an effective engine configuration. Inherited daemon environment, project configuration, and model-specific defaults can affect CLI resolution; those are not proved by reading the root preference. No settings, credentials, or trust state were changed to force a result.
 
-## Source change awaiting runtime validation
+## Source change and compatibility
 
 The fork now adds an optional `reasoning` string to the MCP `start_run` schema and forwards a nonempty value to the existing run request reasoning field. No shared DTO, HTTP API, CLI adapter, default preference, or security setting is changed. Existing API/runtime reasoning support is reused; CLI surface parity does not require a new command for this MCP-only forwarding change.
 
 There is no global enum: runtime/model options differ and can be discovered dynamically. The existing runner remains responsible for validating the selected runtime/model effort. An omitted or empty string is not forwarded; explicit `default` is forwarded for the existing runner/adapter default handling. Existing callers therefore retain their previous behavior.
 
-Nine focused regression cases were added to `apps/daemon/tests/mcp-runs.test.ts`: optional string schema and runtime-boundary acceptance, four non-string rejection cases, forwarding medium/default, and omitted/empty default preservation. These are authored tests, not reported as executed or passing. They must run with the installed dependency toolchain before the branch is ready:
+Eleven focused MCP regression cases were added to `apps/daemon/tests/mcp-runs.test.ts`: optional string schema and runtime-boundary acceptance, four non-string rejection cases, forwarding medium/high/xhigh/default, and omitted/empty default preservation. The MCP suite, CLI config-argument suite, and app-server typed-parameter suite passed together (139 tests). The moved client suite passed separately (5 tests). The following checks also passed with isolated official Node 24.15.0 and pnpm 10.33.2:
 
 ```sh
 pnpm --filter @open-design/daemon exec vitest run -c vitest.config.ts tests/mcp-runs.test.ts
@@ -47,10 +47,37 @@ pnpm guard
 pnpm typecheck
 ```
 
-The changed source and test files passed Node 24 syntax-only `--experimental-strip-types --check` and `git diff --check`. These checks neither resolve imports nor typecheck code. A model/effort acceptance check and disposable Local Codex generation remain pending on an isolated runtime. This change does not fix missing host tool injection.
+The changed source and test files also passed syntax-only checks and `git diff --check`. The full repository typecheck passed, followed by a focused e2e typecheck after moving the client suite to its required location. This change does not fix missing host tool injection.
 
-Executing a custom runtime requires a separately reviewed isolated-build plan: supported Node/pnpm and dependencies, namespaced disposable data, separate ports, no MCP re-registration, no replacement of the signed installation, and no changes to trust or security permissions. No custom build was installed or started for this investigation. Approval for isolated dependencies/build/runtime execution remains pending.
+Executing a custom runtime requires a separately reviewed isolated-build plan: supported Node/pnpm and dependencies, namespaced disposable data, separate ports, no MCP re-registration, no replacement of the signed installation, and no changes to trust or security permissions. The user subsequently approved isolated dependency/build/runtime execution. The source runtime was started through tools-dev in a fresh namespace with separate data and ports. It did not replace the signed application or modify existing MCP registration, trust, or security settings.
 
 ## Validation limits
 
-Five client tests passed on the installed Helper's existing Node 24.15.0 carrier. A live registered-MCP smoke passed using this client: initialize, tools/list (22 tools), and advertised read-only list_agents on the same connection. Discovery returned Codex CLI 0.162.1 and 10 current model entries, including gpt-6.1-sol; it did not include an authentication-status field. The earlier harmless login-status check is separate evidence and does not establish quota or generation success. Full repository `pnpm guard`, `pnpm typecheck`, and daemon Vitest have not run: dependencies and pnpm are absent. This branch is diagnostic work in progress, not a ready upstream product fix.
+Five client tests initially passed on the installed Helper's existing Node 24.15.0 carrier and subsequently passed in the repository e2e Vitest lane. A live registered-MCP smoke passed using this client: initialize, tools/list (22 tools), and advertised read-only list_agents on the same connection. Discovery returned Codex CLI 0.162.1 and 10 current model entries, including gpt-6.1-sol; it did not include an authentication-status field. The earlier harmless login-status check is separate evidence and does not establish quota or generation success. Full repository `pnpm guard` and `pnpm typecheck`, focused daemon Vitest, and the client e2e fixture suite passed after approved isolated dependency installation. Native host tool injection remains outside this change.
+
+## Signed-runtime disposable acceptance
+
+The existing signed runtime 0.25.0 completed one attributed Local Codex counter generation on 2026-10-21. The run used explicit model `gpt-6.1-sol`, reached succeeded with exit 0 in about 32 seconds, and produced one `index.html`. The artifact was read through advertised `get_artifact` with workflow attribution: 2,627 bytes, untruncated, SHA-256 `21e682af641e0dd996009e273c57f4442f16f43354946f76ab96346846979d47`.
+
+Mac Chrome verification passed initial zero, click increment/reset, Enter/Space activation, Tab focus, visible 3px focus outline, and polite live-region semantics. At 390 pixels, document and body scroll widths both measured 390; buttons measured 148 by 48 pixels. The temporary viewport override was cleared. No existing product design was changed.
+
+The run diagnostics record the requested model but explicitly mark resolved model and reasoning as not collected. The ordinary CLI root effort was low. A separate read-only `model/list` query to the installed CLI reported Sol 6.1 support for low, medium, high, xhigh, max, and ultra, with low as its default. These observations do not replace per-run effective-engine evidence.
+
+The source regression matrix now includes medium/high/xhigh in MCP forwarding, CLI config overrides, and app-server turn parameters. Isolated build/dependency execution was subsequently approved and completed; the parameter witnesses below record its results. The already completed signed-runtime generation is not restarted for those parameter tests.
+
+
+## Live patched-runner parameter witnesses
+
+The compiled patched MCP advertised the new optional string. On the tools-dev daemon, three disposable direct-MCP regression requests traversed the actual run route, runner validation, and app-server adapter. The repository's existing fake Codex CLI captured `turn/start` model `gpt-6.1-sol` and the matching effort for each case. All three reached succeeded. The fake runtime used its own empty CLI home; no provider account or real model was invoked for these parameter cases.
+
+| Requested effort | Captured CLI effort | Run |
+| --- | --- | --- |
+| medium | medium | 03bbf709-0d3d-4552-8722-aef4721a0649 |
+| high | high | 919c1ca6-2028-4c07-86e0-0309c15b72b9 |
+| xhigh | xhigh | a4b844f1-c791-4e41-8983-54859feeda12 |
+
+The first integration assertion incorrectly expected a top-level reasoning field; the advertised diagnostic field is `executionDiagnostics.environment.reasoning.value`. The already completed medium run was inspected and retained, not restarted. xhigh initially hit an existing project-name cache after creation and returned no matching project before any run existed. A fresh connection verified the existing project and submitted that pending case; completed runs were not repeated. That resolver-cache behavior is outside this reasoning patch.
+
+The first guard identified a test-layout violation; client coverage was moved into `e2e/tests/scripts/` and revalidated. The first focused suite identified fixture cache interference from the new tests; those cases now use UUID project references and preserve the pre-existing name-resolution oracle. These corrections changed tests only.
+
+The test runtime is disposable; retain curated results and stop only its tools-dev namespace. The signed-runtime artifact and the source patch remain separate deliverables. A captured fake-CLI effort proves parameter transport, not high-effort model quality or a new production installation.
