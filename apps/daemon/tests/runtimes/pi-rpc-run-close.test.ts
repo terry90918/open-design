@@ -64,6 +64,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   W({ type: 'agent_end' });
   if (mode === 'stdout-close-alive' || mode === 'stdout-close-sigterm-exit') {
     try { fs.closeSync(1); } catch {}
+    fs.openSync(require('node:os').devNull, 'w');
   }
   if (mode === 'nonzero') process.exit(143);
 });
