@@ -209,6 +209,7 @@ async function downloadUrl(
       result = await run(ytdlp, [
         '--ignore-config', '--no-playlist', '--no-progress', '--match-filter', `!is_live & duration <= ${MOTION_REFERENCE_MAX_SECONDS}`,
         '-f', 'bv*[height<=1080]+ba/b[height<=1080]/b', '--merge-output-format', 'mp4',
+        '--ffmpeg-location', ffmpegPath(),
         '--max-filesize', String(MOTION_REFERENCE_MAX_BYTES), '-o', out,
         '--proxy', proxy.url, url,
       ], 300_000);

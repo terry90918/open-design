@@ -215,6 +215,10 @@ describe('buildMotionReference', () => {
       process.env.OD_YTDLP_PATH = fake;
       await buildMotionReference({ projectDir: project, source: 'https://x.com/a/status/1', id: 'sink' }).catch(() => null);
       const args = await readFile(argsFile, 'utf8');
+      const argv = args.trimEnd().split('\n');
+      const ffmpegLocationIndex = argv.indexOf('--ffmpeg-location');
+      expect(ffmpegLocationIndex).toBeGreaterThanOrEqual(0);
+      expect(argv[ffmpegLocationIndex + 1]).toBe(ffmpegInstaller.path);
       expect(args).toContain('--proxy');
       // The downloader gets a loopback proxy (its own instance per run), never a
       // bare connection to the caller's URL.
