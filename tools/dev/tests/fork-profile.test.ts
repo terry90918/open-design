@@ -27,9 +27,9 @@ test('resolves an explicit fork profile into its own checkout scratch', () => {
   assert.equal(value.buildRevision, 'a'.repeat(40));
 });
 
-test('targets the web app so profile stop halts both daemon and web', () => {
+test('suppresses pnpm banners and targets web so stop halts both daemon and web', () => {
   const args = lifecycleArgs(parseForkProfile(profile(), '/checkout'), 'stop', 'web');
-  assert.deepEqual(args.slice(0, 3), ['tools-dev', 'stop', 'web']);
+  assert.deepEqual(args.slice(0, 4), ['--silent', 'tools-dev', 'stop', 'web']);
   assert.equal(args.includes('all'), false);
 });
 

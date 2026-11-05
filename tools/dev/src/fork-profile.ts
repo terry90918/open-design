@@ -122,7 +122,8 @@ function environment(profile: ForkProfile): NodeJS.ProcessEnv {
 }
 
 export function lifecycleArgs(profile: ForkProfile, action: 'start' | 'status' | 'stop', app?: string): string[] {
-  const args = ['tools-dev', action];
+  // Suppress pnpm's script banner so stdout remains parseable JSON.
+  const args = ['--silent', 'tools-dev', action];
   if (app) args.push(app);
   args.push('--namespace', profile.namespace, '--tools-dev-root', profile.toolsDevRoot, '--no-env-file', '--json');
   if (action === 'start') args.push('--daemon-port', String(profile.daemonPort), '--web-port', String(profile.webPort));
