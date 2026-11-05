@@ -139,6 +139,24 @@ describe('compareMotionFilms', () => {
     }
   });
 
+  it('does not delete the project root through an output symlink alias', async () => {
+    const attackProject = path.join(project, 'root-alias-case');
+    const outputRoot = path.join(attackProject, '.motion-compare');
+    await mkdir(path.join(outputRoot), { recursive: true });
+    await copyFile(path.join(project, 'ref.mp4'), path.join(attackProject, 'ref.mp4'));
+    await copyFile(path.join(project, 'same.mp4'), path.join(attackProject, 'same.mp4'));
+    await writeFile(path.join(attackProject, 'keep.txt'), 'keep');
+    await symlink('..', path.join(outputRoot, 'alias'), 'dir');
+
+    try {
+      await expect(compareMotionFilms({ projectDir: attackProject, reference: 'ref.mp4', candidate: 'same.mp4', times: [0.5], id: 'alias' }))
+        .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(readFile(path.join(attackProject, 'keep.txt'), 'utf8')).resolves.toBe('keep');
+    } finally {
+      await rm(attackProject, { recursive: true, force: true });
+    }
+  });
+
   it('works in a project whose only files sit at the top level', async () => {
     const fresh = path.join(project, 'fresh');
     await mkdir(fresh, { recursive: true });

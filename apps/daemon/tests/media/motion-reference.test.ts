@@ -237,6 +237,22 @@ describe('buildMotionReference', () => {
     }
   });
 
+  it('does not delete the project root through an output symlink alias', async () => {
+    const attackProject = path.join(project, 'root-alias-case');
+    const outputRoot = path.join(attackProject, MOTION_REFERENCE_ROOT);
+    await mkdir(path.join(outputRoot), { recursive: true });
+    await writeFile(path.join(attackProject, 'keep.txt'), 'keep');
+    await symlink('..', path.join(outputRoot, 'ref'), 'dir');
+
+    try {
+      await expect(buildMotionReference({ projectDir: attackProject, source: 'missing.mp4', id: 'ref' }))
+        .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(readFile(path.join(attackProject, 'keep.txt'), 'utf8')).resolves.toBe('keep');
+    } finally {
+      await rm(attackProject, { recursive: true, force: true });
+    }
+  });
+
   it('works in a brand-new project whose folder does not exist yet', async () => {
     const fresh = path.join(project, 'not-created-yet');
     const r = await buildMotionReference({ projectDir: fresh, source: `${base}/clip.mp4`, id: 'f', fetchLink: loopbackFetch });
