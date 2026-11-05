@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { test } from 'vitest';
-import { parseForkProfile } from '../../../tools/dev/src/fork-profile.ts';
+import { mkdtemp, mkdir, realpath, rm, symlink } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { test } from 'node:test';
+import { parseForkProfile, resolveVerifiedScratchPath } from '../src/fork-profile.js';
 
 function profile() {
   return {
@@ -24,12 +27,12 @@ test('resolves an explicit fork profile into its own checkout scratch', () => {
   assert.equal(value.buildRevision, 'a'.repeat(40));
 });
 
-test.each(['dataDir', 'toolsDevRoot', 'nodeExecutable'])('rejects %s outside the isolated checkout', key => {
+for (const key of ['dataDir', 'toolsDevRoot', 'nodeExecutable']) test(`rejects ${key} outside the isolated checkout`, () => {
   assert.throws(() => parseForkProfile({ ...profile(), [key]: '../production' }, '/checkout'), /isolated scratch/);
   assert.throws(() => parseForkProfile({ ...profile(), [key]: '.tmp/../../production' }, '/checkout'), /isolated scratch/);
 });
 
-test.each(['default', 'release-stable', '../fork-escape'])('rejects a shared or escaping namespace %s', namespace => {
+for (const namespace of ['default', 'release-stable', '../fork-escape']) test(`rejects a shared or escaping namespace ${namespace}`, () => {
   assert.throws(() => parseForkProfile({ ...profile(), namespace }, '/checkout'), /fork- namespace/);
 });
 
@@ -37,4 +40,19 @@ test('rejects missing build identity and overlapping ports', () => {
   assert.throws(() => parseForkProfile({ ...profile(), hashes: {} }, '/checkout'), /nonempty string/);
   assert.throws(() => parseForkProfile({ ...profile(), buildRevision: 'HEAD' }, '/checkout'), /complete commit SHA/);
   assert.throws(() => parseForkProfile({ ...profile(), webPort: 49784 }, '/checkout'), /must differ/);
+});
+
+test('allows first start to create missing runtime roots without following escaping symlinks', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'fork-profile-root-'));
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'fork-profile-outside-'));
+  try {
+    assert.equal(await resolveVerifiedScratchPath('.tmp/fresh/data', 'dataDir', root, true), path.join(await realpath(root), '.tmp/fresh/data'));
+    await assert.rejects(resolveVerifiedScratchPath('.tmp/fresh/data', 'dataDir', root), { code: 'ENOENT' });
+
+    await mkdir(path.join(root, '.tmp'), { recursive: true });
+    await symlink(outside, path.join(root, '.tmp', 'escape'));
+    await assert.rejects(resolveVerifiedScratchPath('.tmp/escape/new-runtime', 'toolsDevRoot', root, true), /isolated scratch/);
+  } finally {
+    await Promise.all([rm(root, { recursive: true, force: true }), rm(outside, { recursive: true, force: true })]);
+  }
 });

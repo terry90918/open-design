@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
-import { readFile, realpath } from 'node:fs/promises';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -74,10 +74,35 @@ export function parseForkProfile(value: unknown, root = workspace): ForkProfile 
   };
 }
 
-async function verify(profile: ForkProfile, root = workspace): Promise<void> {
-  for (const [name, location] of Object.entries({ dataDir: profile.dataDir, toolsDevRoot: profile.toolsDevRoot, nodeExecutable: profile.nodeExecutable })) {
-    scratchPath(await realpath(location), name, await realpath(root));
+export async function resolveVerifiedScratchPath(location: string, name: string, root = workspace, allowMissing = false): Promise<string> {
+  const rootReal = await realpath(root);
+  const candidate = scratchPath(location, name, rootReal);
+  let current = candidate;
+  const missing: string[] = [];
+  for (;;) {
+    try {
+      const resolved = path.resolve(await realpath(current), ...missing);
+      return scratchPath(resolved, name, rootReal);
+    } catch (error) {
+      if (!allowMissing || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const entry = await lstat(current).catch((statError: NodeJS.ErrnoException) => {
+        if (statError.code === 'ENOENT') return null;
+        throw statError;
+      });
+      if (entry?.isSymbolicLink()) throw new Error(`${name} must not be a broken symlink`);
+      const parent = path.dirname(current);
+      if (parent === current) throw error;
+      missing.unshift(path.basename(current));
+      current = parent;
+    }
   }
+}
+
+async function verify(profile: ForkProfile, action: string, root = workspace): Promise<void> {
+  const allowMissingRuntimeRoots = action === 'start' || action === 'status' || action === 'stop';
+  await resolveVerifiedScratchPath(profile.dataDir, 'dataDir', root, allowMissingRuntimeRoots);
+  await resolveVerifiedScratchPath(profile.toolsDevRoot, 'toolsDevRoot', root, allowMissingRuntimeRoots);
+  await resolveVerifiedScratchPath(profile.nodeExecutable, 'nodeExecutable', root);
   for (const file of digestFiles) {
     const actual = createHash('sha256').update(await readFile(path.join(root, file))).digest('hex');
     if (actual !== profile.hashes[file]) throw new Error(`Build drift at ${file}; rebuild and review the profile explicitly`);
@@ -130,7 +155,7 @@ export async function runForkProfile(action: string, filename: string | undefine
     throw new Error('Usage: pnpm tools-dev fork-profile <start|status|stop|check|stdio> --profile <reviewed-profile.json>');
   }
   const profile = parseForkProfile(JSON.parse(await readFile(filename, 'utf8')), root);
-  await verify(profile, root);
+  await verify(profile, action, root);
   if (action === 'start' || action === 'status' || action === 'stop') {
     console.log(JSON.stringify(await lifecycle(profile, action, action === 'stop' ? 'all' : 'web', root), null, 2));
     return;
