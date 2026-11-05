@@ -498,11 +498,20 @@ async function cropDeckViewportToSlide(page, fallbackW, fallbackH) {
 async function bakeOne(browser, id, hash, options) {
   const page = await browser.newPage();
   const readinessErrors = [];
+  let readinessWaitError = null;
+  const recordReadinessError = (message) => {
+    if (readinessErrors.length < 3) readinessErrors.push(message);
+  };
   page.on('pageerror', (error) => {
-    if (readinessErrors.length < 3) readinessErrors.push(error.message);
+    recordReadinessError(error.message);
   });
   page.on('console', (message) => {
-    if (message.type() === 'error' && readinessErrors.length < 3) readinessErrors.push(message.text());
+    if (message.type() === 'error') recordReadinessError(message.text());
+  });
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      recordReadinessError(`HTTP ${response.status()} ${response.url()}`);
+    }
   });
   await page.setViewport({ width: RENDER_W, height: VIEW_H, deviceScaleFactor: 1 });
   const previewUrl = `${BASE_URL}/api/plugins/${encodeURIComponent(id)}/preview`;
@@ -631,11 +640,17 @@ async function bakeOne(browser, id, hash, options) {
   // Pages without the marker keep the existing capture timing. Never publish
   // a loading-screen poster when an opted-in page fails to become ready.
   try {
-    await page.waitForFunction(
-      () => document.documentElement.getAttribute('data-od-preview-ready') !== 'false',
-      { timeout: 15000 },
+    const stillWaiting = await page.evaluate(
+      () => document.documentElement.getAttribute('data-od-preview-ready') === 'false',
     );
-  } catch {
+    if (stillWaiting) {
+      await page.waitForFunction(
+        () => document.documentElement.getAttribute('data-od-preview-ready') !== 'false',
+        { polling: 'mutation', timeout: 15000 },
+      );
+    }
+  } catch (error) {
+    readinessWaitError = error instanceof Error ? error.message : String(error);
     const state = await page.evaluate(() => ({
       ready: document.documentElement.getAttribute('data-od-preview-ready'),
       documentReady: document.readyState,
@@ -644,7 +659,7 @@ async function bakeOne(browser, id, hash, options) {
       timeline: Boolean(window.__timelines?.main),
     })).catch((error) => ({ diagnostic: error.message }));
     await page.close();
-    const detail = [...readinessErrors, JSON.stringify(state)].filter(Boolean).join('; ');
+    const detail = [...readinessErrors, readinessWaitError, JSON.stringify(state)].filter(Boolean).join('; ');
     return { id, skipped: `preview readiness timeout${detail ? `: ${detail}` : ''}` };
   }
 
