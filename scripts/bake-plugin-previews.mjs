@@ -497,6 +497,13 @@ async function cropDeckViewportToSlide(page, fallbackW, fallbackH) {
 // ---- render + encode one plugin -------------------------------------------
 async function bakeOne(browser, id, hash, options) {
   const page = await browser.newPage();
+  const readinessErrors = [];
+  page.on('pageerror', (error) => {
+    if (readinessErrors.length < 3) readinessErrors.push(error.message);
+  });
+  page.on('console', (message) => {
+    if (message.type() === 'error' && readinessErrors.length < 3) readinessErrors.push(message.text());
+  });
   await page.setViewport({ width: RENDER_W, height: VIEW_H, deviceScaleFactor: 1 });
   const previewUrl = `${BASE_URL}/api/plugins/${encodeURIComponent(id)}/preview`;
   try {
@@ -629,8 +636,16 @@ async function bakeOne(browser, id, hash, options) {
       { timeout: 15000 },
     );
   } catch {
+    const state = await page.evaluate(() => ({
+      ready: document.documentElement.getAttribute('data-od-preview-ready'),
+      documentReady: document.readyState,
+      fonts: document.fonts?.status,
+      pendingImages: [...document.images].filter((image) => !image.complete).length,
+      timeline: Boolean(window.__timelines?.main),
+    })).catch((error) => ({ diagnostic: error.message }));
     await page.close();
-    return { id, skipped: 'preview readiness timeout' };
+    const detail = [...readinessErrors, JSON.stringify(state)].filter(Boolean).join('; ');
+    return { id, skipped: `preview readiness timeout${detail ? `: ${detail}` : ''}` };
   }
 
   if (options?.bakeStillAtSec != null) {
