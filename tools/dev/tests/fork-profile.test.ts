@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, realpath, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { parseForkProfile, resolveVerifiedScratchPath } from '../src/fork-profile.js';
+import { lifecycleArgs, parseForkProfile, resolveVerifiedScratchPath } from '../src/fork-profile.js';
 
 function profile() {
   return {
@@ -25,6 +25,12 @@ test('resolves an explicit fork profile into its own checkout scratch', () => {
   assert.equal(value.dataDir, '/checkout/.tmp/test-data');
   assert.equal(value.toolsDevRoot, '/checkout/.tmp/test-runtime');
   assert.equal(value.buildRevision, 'a'.repeat(40));
+});
+
+test('targets the web app so profile stop halts both daemon and web', () => {
+  const args = lifecycleArgs(parseForkProfile(profile(), '/checkout'), 'stop', 'web');
+  assert.deepEqual(args.slice(0, 3), ['tools-dev', 'stop', 'web']);
+  assert.equal(args.includes('all'), false);
 });
 
 for (const key of ['dataDir', 'toolsDevRoot', 'nodeExecutable']) test(`rejects ${key} outside the isolated checkout`, () => {

@@ -70,6 +70,31 @@ describe('createRunNoticeLog', () => {
     expect(JSON.stringify(all)).not.toContain('Done');
   });
 
+  it('does not advance past notices recorded while visibility checks are pending', async () => {
+    const log = createRunNoticeLog({ projectName: () => null, startedAt: 0 });
+    log.record({ id: 'r1', projectId: 'p', events: [] }, 'failed', 1);
+
+    let releaseFilter!: () => void;
+    let notifyFilterStarted!: () => void;
+    const filterGate = new Promise<void>((resolve) => { releaseFilter = resolve; });
+    const filterStarted = new Promise<void>((resolve) => { notifyFilterStarted = resolve; });
+    const firstReadPromise = log.read(0, async () => {
+      notifyFilterStarted();
+      await filterGate;
+      return true;
+    });
+
+    await filterStarted;
+    log.record({ id: 'r2', projectId: 'p', events: [] }, 'failed', 2);
+    releaseFilter();
+
+    const firstRead = await firstReadPromise;
+    expect(firstRead.latestSeq).toBe(1);
+    expect(firstRead.notices.map((notice) => notice.seq)).toEqual([1]);
+    const nextRead = await log.read(firstRead.latestSeq);
+    expect(nextRead.notices.map((notice) => notice.seq)).toEqual([2]);
+  });
+
   it('never records a run that ended before this process started (startup backfill)', async () => {
     const log = createRunNoticeLog({ projectName: () => null, startedAt: 1_000 });
     log.record({ id: 'old', projectId: 'a', events: [] }, 'failed', 999);

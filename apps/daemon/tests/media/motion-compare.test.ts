@@ -76,6 +76,14 @@ describe('compareMotionFilms', () => {
     expect(facts.pairs).toHaveLength(2);
   });
 
+  it('uses collision-resistant default output IDs for concurrent comparisons', async () => {
+    const [first, second] = await Promise.all([
+      compareMotionFilms({ projectDir: project, reference: 'ref.mp4', candidate: 'same.mp4', times: [0.5] }),
+      compareMotionFilms({ projectDir: project, reference: 'ref.mp4', candidate: 'same.mp4', times: [0.5] }),
+    ]);
+    expect(first.dir).not.toBe(second.dir);
+  });
+
   it('marks a film that drifted from the reference, and names where', async () => {
     const r = await compareMotionFilms({ projectDir: project, reference: 'ref.mp4', candidate: 'other.mp4', times: [0.5, 2], id: 'b' });
     expect(r.pairs[0]!.ssim).toBeLessThan(0.5);

@@ -121,10 +121,16 @@ function environment(profile: ForkProfile): NodeJS.ProcessEnv {
   };
 }
 
-async function lifecycle(profile: ForkProfile, action: 'start' | 'status' | 'stop', app = 'web', root = workspace): Promise<unknown> {
-  const args = ['tools-dev', action, app,
-    '--namespace', profile.namespace, '--tools-dev-root', profile.toolsDevRoot, '--no-env-file', '--json'];
+export function lifecycleArgs(profile: ForkProfile, action: 'start' | 'status' | 'stop', app?: string): string[] {
+  const args = ['tools-dev', action];
+  if (app) args.push(app);
+  args.push('--namespace', profile.namespace, '--tools-dev-root', profile.toolsDevRoot, '--no-env-file', '--json');
   if (action === 'start') args.push('--daemon-port', String(profile.daemonPort), '--web-port', String(profile.webPort));
+  return args;
+}
+
+async function lifecycle(profile: ForkProfile, action: 'start' | 'status' | 'stop', app: string | undefined = 'web', root = workspace): Promise<unknown> {
+  const args = lifecycleArgs(profile, action, app);
   const { stdout } = await exec('pnpm', args, { cwd: root, env: environment(profile), maxBuffer: 1024 * 1024 });
   return JSON.parse(stdout);
 }
@@ -157,7 +163,7 @@ export async function runForkProfile(action: string, filename: string | undefine
   const profile = parseForkProfile(JSON.parse(await readFile(filename, 'utf8')), root);
   await verify(profile, action, root);
   if (action === 'start' || action === 'status' || action === 'stop') {
-    console.log(JSON.stringify(await lifecycle(profile, action, action === 'stop' ? 'all' : 'web', root), null, 2));
+    console.log(JSON.stringify(await lifecycle(profile, action, 'web', root), null, 2));
     return;
   }
   await ready(profile, root);

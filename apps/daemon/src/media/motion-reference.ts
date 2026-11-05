@@ -3,6 +3,7 @@
 // duration, size, fps, audio presence, shot cuts, a frame at every shot and a
 // contact sheet. The agent reads these files; nothing here interprets the film.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { resolveYtDlp } from './yt-dlp.js';
 import { assertPublicAssetUrl, fetchPublicAsset } from '../public-asset-fetch.js';
@@ -17,6 +18,7 @@ import { pipeline } from 'node:stream/promises';
 export const MOTION_REFERENCE_ROOT = '.motion-reference';
 export const MOTION_REFERENCE_MAX_BYTES = 200 * 1024 * 1024;
 export const MOTION_REFERENCE_MAX_SECONDS = 180;
+const MOTION_REFERENCE_FETCH_TIMEOUT_MS = 300_000;
 const MAX_FRAMES = 24;
 const MIN_FRAME_GAP_SECONDS = 0.4;
 const SCENE_THRESHOLD = 0.3;
@@ -134,12 +136,18 @@ export function pickFrameTimes(cuts: number[], durationSec: number): number[] {
  * not a video file or cannot be reached, so the caller decides what to say.
  * A too-large video is still refused outright: falling back cannot help there.
  */
-async function fetchDirect(url: string, dir: string, fetcher: LinkFetcher = fetchPublicAsset): Promise<string | null> {
+async function fetchDirect(
+  url: string,
+  dir: string,
+  fetcher: LinkFetcher = fetchPublicAsset,
+  timeoutMs = MOTION_REFERENCE_FETCH_TIMEOUT_MS,
+): Promise<string | null> {
   // `source` is user- or agent-supplied, so both the URL and every redirect hop
   // go through the shared public-address guard: a public link must not be able
   // to make the daemon reach loopback, link-local or private-network services.
   let response: Response;
-  try { response = await fetcher(url); } catch { return null; }
+  const signal = AbortSignal.timeout(timeoutMs);
+  try { response = await fetcher(url, { signal }); } catch { return null; }
   const type = response.headers.get('content-type') ?? '';
   if (!response.ok || !response.body || !/^video\//i.test(type)) return null;
   const length = Number(response.headers.get('content-length') ?? 0);
@@ -151,7 +159,13 @@ async function fetchDirect(url: string, dir: string, fetcher: LinkFetcher = fetc
     bytes += chunk.length;
     if (bytes > MOTION_REFERENCE_MAX_BYTES) counted.destroy(new MotionReferenceError('TOO_LARGE', 'The video is larger than 200 MB.'));
   });
-  try { await pipeline(counted, createWriteStream(target)); } catch { return null; }
+  try {
+    await pipeline(counted, createWriteStream(target), { signal });
+  } catch (error) {
+    await rm(target, { force: true }).catch(() => {});
+    if (error instanceof MotionReferenceError && error.code === 'TOO_LARGE') throw error;
+    return null;
+  }
   return target;
 }
 
@@ -173,7 +187,13 @@ export function isDownloaderHost(url: string): boolean {
   return DOWNLOADER_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
 }
 
-async function downloadUrl(url: string, dir: string, toolsDir: string | null, fetcher?: LinkFetcher): Promise<string> {
+async function downloadUrl(
+  url: string,
+  dir: string,
+  toolsDir: string | null,
+  fetcher?: LinkFetcher,
+  fetchTimeoutMs = MOTION_REFERENCE_FETCH_TIMEOUT_MS,
+): Promise<string> {
   const viaDownloader = isDownloaderHost(url)
     && await assertPublicAssetUrl(url).then(() => true, () => false);
   const ytdlp = viaDownloader ? await resolveYtDlp(toolsDir) : null;
@@ -203,12 +223,12 @@ async function downloadUrl(url: string, dir: string, toolsDir: string | null, fe
     const blocked = /login|sign in|cookies|private/i.test(result.stderr) ? 'the site requires a login'
       : /does not pass filter|is_live|duration/i.test(result.stderr) ? `it is live or longer than ${MOTION_REFERENCE_MAX_SECONDS} seconds`
         : null;
-    const direct = await fetchDirect(url, dir, fetcher);
+    const direct = await fetchDirect(url, dir, fetcher, fetchTimeoutMs);
     if (direct) return direct;
     throw new MotionReferenceError('NEEDS_UPLOAD', `Could not download the link (${blocked ?? 'the download failed'}). Download the video and attach the file instead.`);
   }
   // Any other link is fetched only as a direct video file, through the guard.
-  const direct = await fetchDirect(url, dir, fetcher);
+  const direct = await fetchDirect(url, dir, fetcher, fetchTimeoutMs);
   if (direct) return direct;
   throw new MotionReferenceError('NEEDS_UPLOAD', 'This link is not a video file or a supported video site. Download the video and attach the file instead.');
 }
@@ -231,10 +251,10 @@ async function resolveProjectFile(projectDir: string, source: string): Promise<s
  */
 export type LinkFetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
-export async function buildMotionReference(input: { projectDir: string; source: string; id?: string; toolsDir?: string; rulesFile?: string; fetchLink?: LinkFetcher }): Promise<MotionReferenceResult> {
+export async function buildMotionReference(input: { projectDir: string; source: string; id?: string; toolsDir?: string; rulesFile?: string; fetchLink?: LinkFetcher; fetchTimeoutMs?: number }): Promise<MotionReferenceResult> {
   const source = input.source?.trim();
   if (!source) throw new MotionReferenceError('BAD_REQUEST', 'source is required (a project file path or an http(s) link)');
-  const id = input.id?.trim() || `ref-${Date.now().toString(36)}`;
+  const id = input.id?.trim() || `ref-${randomUUID()}`;
   if (!ID_RE.test(id)) throw new MotionReferenceError('BAD_REQUEST', 'id must be letters, digits, dot, dash or underscore');
   // A new project has no folder until its first file; create it before resolving.
   await mkdir(input.projectDir, { recursive: true });
@@ -254,7 +274,7 @@ export async function buildMotionReference(input: { projectDir: string; source: 
 
   const isUrl = /^https?:\/\//i.test(source);
   let video: string;
-  if (isUrl) video = await downloadUrl(source, dir, input.toolsDir ?? null, input.fetchLink);
+  if (isUrl) video = await downloadUrl(source, dir, input.toolsDir ?? null, input.fetchLink, input.fetchTimeoutMs);
   else {
     const file = await resolveProjectFile(projectDir, source);
     video = path.join(dir, `reference${path.extname(file).toLowerCase() || '.mp4'}`);

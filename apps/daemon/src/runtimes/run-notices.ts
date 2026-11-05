@@ -105,12 +105,15 @@ export function createRunNoticeLog(options: {
     },
     async read(after, filter) {
       const from = Number.isFinite(after) ? after : 0;
-      const pending = notices.filter((notice) => notice.seq > from);
+      // Snapshot the cursor and its matching notices together before an
+      // asynchronous visibility filter can yield to new terminal records.
+      const latestSeqAtRead = latestSeq;
+      const pending = notices.filter((notice) => notice.seq > from && notice.seq <= latestSeqAtRead);
       const visible: RunNotice[] = [];
       for (const notice of pending) {
         if (!filter || await filter(notice)) visible.push(notice);
       }
-      return { epoch, latestSeq, notices: visible };
+      return { epoch, latestSeq: latestSeqAtRead, notices: visible };
     },
   };
 }

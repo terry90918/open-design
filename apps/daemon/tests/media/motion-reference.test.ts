@@ -73,6 +73,7 @@ describe('buildMotionReference', () => {
     await writeFile(path.join(project, 'notes.txt'), 'not a video');
     server = http.createServer((req, res) => {
       if (req.url === '/clip.mp4') { void readFile(path.join(project, 'ref.mp4')).then((b) => { res.writeHead(200, { 'content-type': 'video/mp4' }); res.end(b); }); return; }
+      if (req.url === '/slow.mp4') { res.writeHead(200, { 'content-type': 'video/mp4' }); res.write('partial'); return; }
       res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html>a post page</html>');
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -117,6 +118,19 @@ describe('buildMotionReference', () => {
     const r = await buildMotionReference({ projectDir: project, source: `${base}/clip.mp4`, id: 'b', fetchLink: loopbackFetch });
     expect(r.source.kind).toBe('url');
     expect(r.durationSec).toBeCloseTo(4, 0);
+  });
+
+  it('bounds a direct video response that stalls during body consumption', async () => {
+    await expect(buildMotionReference({ projectDir: project, source: `${base}/slow.mp4`, id: 'slow', fetchLink: loopbackFetch, fetchTimeoutMs: 100 }))
+      .rejects.toMatchObject({ code: 'NEEDS_UPLOAD' });
+  });
+
+  it('uses collision-resistant default output IDs for concurrent references', async () => {
+    const [first, second] = await Promise.all([
+      buildMotionReference({ projectDir: project, source: 'ref.mp4' }),
+      buildMotionReference({ projectDir: project, source: 'ref.mp4' }),
+    ]);
+    expect(first.dir).not.toBe(second.dir);
   });
 
   it('still takes a direct video link when a downloader is installed but filters it out', async () => {

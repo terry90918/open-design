@@ -4,6 +4,7 @@
 // Judging whether a film is right stays with the model — this tool removes the
 // guesswork about where it drifted, not the judgement.
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { lstat, mkdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -135,7 +136,7 @@ export async function compareMotionFilms(input: {
   const projectDir = await realpath(input.projectDir);
   const reference = await resolveVideo(projectDir, input.reference);
   const candidate = await resolveVideo(projectDir, input.candidate);
-  const id = input.id?.trim() || `cmp-${Date.now().toString(36)}`;
+  const id = input.id?.trim() || `cmp-${randomUUID()}`;
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id)) {
     throw new MotionCompareError('BAD_REQUEST', 'id must be letters, digits, dot, dash or underscore');
   }
