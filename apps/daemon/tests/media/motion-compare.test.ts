@@ -22,6 +22,8 @@ describe('motion compare parsing', () => {
 
   it('reads the ssim score and ignores unrelated output', () => {
     expect(parseSsim('[Parsed_ssim_0] SSIM Y:0.99 U:0.98 V:0.97 All:0.9843 (18.04)')).toBe(0.9843);
+    expect(parseSsim('[Parsed_ssim_0] SSIM Y:-0.99 U:-0.98 V:-0.97 All:-0.9900 (0.00)')).toBe(-0.99);
+    expect(parseSsim('All:+0.5000 (8.00)')).toBe(0.5);
     expect(parseSsim('no score')).toBeNull();
   });
 
@@ -57,6 +59,9 @@ describe('compareMotionFilms', () => {
     make('other.mp4', 'color=c=blue:s=640x360:d=4');
     make('short.mp4', 'color=c=red:s=640x360:d=1.5');
     make('portrait.mp4', 'color=c=red:s=360x640:d=4');
+    const rotated = spawnSync(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-i', path.join(project, 'ref.mp4'),
+      '-c', 'copy', '-metadata:s:v:0', 'rotate=90', path.join(project, 'rotated-ref.mp4')]);
+    expect(rotated.status).toBe(0);
     await writeFile(path.join(project, 'notes.txt'), 'not a video');
   });
 
@@ -104,6 +109,13 @@ describe('compareMotionFilms', () => {
     expect(r.skipped).toHaveLength(0);
     expect([r.width, r.height]).toEqual([640, 360]);
     expect(r.pairs[0]!.ssim).toBeLessThan(1);
+  });
+
+  it('uses the displayed canvas when a reference has rotation metadata', async () => {
+    const r = await compareMotionFilms({ projectDir: project, reference: 'rotated-ref.mp4', candidate: 'portrait.mp4', times: [0.5, 2], id: 'rotated' });
+    expect(r.pairs).toHaveLength(2);
+    expect(r.skipped).toHaveLength(0);
+    expect([r.width, r.height]).toEqual([640, 1138]);
   });
 
   it('refuses a path outside the project and a non-video', async () => {

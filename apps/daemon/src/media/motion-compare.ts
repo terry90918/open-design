@@ -3,6 +3,7 @@
 // agent reads the pairs; the score only says which timestamp to look at first.
 // Judging whether a film is right stays with the model — this tool removes the
 // guesswork about where it drifted, not the judgement.
+import { parseVideoDimensions } from './ffmpeg-dimensions.js';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -23,7 +24,7 @@ export class MotionCompareError extends Error {
 
 export interface MotionComparePair {
   at: number;
-  /** Structural similarity of the two frames, 0–1; lower means further apart. */
+  /** Structural similarity of the two frames; lower means further apart. */
   ssim: number;
   referenceFrame: string;
   candidateFrame: string;
@@ -68,10 +69,12 @@ export function parseDuration(stderr: string): number {
   return d ? Math.round((Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3])) * 1000) / 1000 : 0;
 }
 
-/** `All:0.984` from ffmpeg's ssim filter. */
+/** All:0.984 from ffmpeg's ssim filter; negative scores are valid. */
 export function parseSsim(stderr: string): number | null {
-  const m = /All:([\d.]+)/.exec(stderr);
-  return m ? Math.round(Number(m[1]) * 10000) / 10000 : null;
+  const m = /All:([+-]?(?:\d+(?:\.\d*)?|\.\d+))(?=\s|$)/.exec(stderr);
+  if (!m) return null;
+  const score = Number(m[1]);
+  return Number.isFinite(score) ? Math.round(score * 10000) / 10000 : null;
 }
 
 /**
@@ -169,10 +172,10 @@ export async function compareMotionFilms(input: {
   const times = pickCompareTimes(referenceDurationSec, input.times, input.cuts);
   // Both frames land on one canvas shaped like the reference, so a film with a
   // different aspect ratio is letterboxed and still scored instead of failing.
-  const refSize = /Stream #\S+.*?Video:.*?\b(\d{2,5})x(\d{2,5})\b/.exec(referenceProbe.stderr);
+  const refSize = parseVideoDimensions(referenceProbe.stderr);
   const canvasW = FRAME_WIDTH;
-  const canvasH = refSize
-    ? Math.max(2, Math.round((FRAME_WIDTH * Number(refSize[2])) / Number(refSize[1]) / 2) * 2)
+  const canvasH = refSize.width && refSize.height
+    ? Math.max(2, Math.round((FRAME_WIDTH * refSize.height) / refSize.width / 2) * 2)
     : Math.round((FRAME_WIDTH * 9) / 16 / 2) * 2;
   const fit = `scale=${canvasW}:${canvasH}:force_original_aspect_ratio=decrease,pad=${canvasW}:${canvasH}:(ow-iw)/2:(oh-ih)/2:black,setsar=1`;
   const extract = async (video: string, at: number, out: string): Promise<boolean> => {

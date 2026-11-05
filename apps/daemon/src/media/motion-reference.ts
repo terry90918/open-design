@@ -2,6 +2,7 @@
 // file or a link) into measured facts the agent can rebuild a film from —
 // duration, size, fps, audio presence, shot cuts, a frame at every shot and a
 // contact sheet. The agent reads these files; nothing here interprets the film.
+import { parseVideoDimensions } from './ffmpeg-dimensions.js';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -78,13 +79,13 @@ export function parseProbe(stderr: string): { durationSec: number; width: number
   const d = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(stderr);
   const durationSec = d ? Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3]) : 0;
   const video = /Stream #\S+.*?Video:([^\n]*)/.exec(stderr);
+  const dimensions = parseVideoDimensions(stderr);
   const desc = video?.[1] ?? '';
-  const size = /\b(\d{2,5})x(\d{2,5})\b/.exec(desc);
   const fps = /([\d.]+)\s*fps/.exec(desc) ?? /([\d.]+)\s*tbr/.exec(desc);
   return {
     durationSec: Math.round(durationSec * 1000) / 1000,
-    width: size ? Number(size[1]) : 0,
-    height: size ? Number(size[2]) : 0,
+    width: dimensions.width,
+    height: dimensions.height,
     fps: fps ? Math.round(Number(fps[1]) * 100) / 100 : 0,
     hasAudio: /Stream #\S+.*?Audio:/.test(stderr),
     // Older ffmpeg builds open any .txt/.nfo as "tty" (ANSI art) and report a

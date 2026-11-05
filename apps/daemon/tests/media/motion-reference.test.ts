@@ -28,6 +28,15 @@ describe('motion reference parsing', () => {
     expect(parseProbe(PROBE.replace(/\n.*Audio:.*$/m, '')).hasAudio).toBe(false);
   });
 
+  it('reports display-oriented dimensions when rotation metadata is present', () => {
+    const clockwise = [PROBE, '  Side data:', '      displaymatrix: rotation of 90.00 degrees'].join('\n');
+    const counterclockwise = [PROBE, '  Side data:', '      displaymatrix: rotation of -90.00 degrees'].join('\n');
+    const halfTurn = [PROBE, '  Side data:', '      displaymatrix: rotation of 180.00 degrees'].join('\n');
+    expect(parseProbe(clockwise)).toMatchObject({ width: 1080, height: 1920 });
+    expect(parseProbe(counterclockwise)).toMatchObject({ width: 1080, height: 1920 });
+    expect(parseProbe(halfTurn)).toMatchObject({ width: 1920, height: 1080 });
+  });
+
   it('does not take a text file that an older ffmpeg opens as tty for a video', () => {
     const tty = `Input #0, tty, from 'notes.txt':\n  Duration: 00:00:00.04, bitrate: 2 kb/s\n  Stream #0:0: Video: ansi, pal8, 640x400, 25 fps, 25 tbr`;
     expect(parseProbe(tty).hasVideo).toBe(false);
