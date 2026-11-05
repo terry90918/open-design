@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { test } from 'vitest';
-import { McpSessionClient } from '../../../scripts/mcp-session-client.ts';
+import { McpSessionClient } from '../../../tools/dev/src/mcp-session-client.ts';
 
 const server = `
 const readline = require('node:readline');

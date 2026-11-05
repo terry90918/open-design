@@ -40,10 +40,11 @@
   animation: dialog-backdrop-fade-in var(--duration-fast, 150ms) var(--curve-decelerate-mid, ease-out);
 }
 
-/* The static panel receives initial focus for modal navigation. Its children
- * retain their own keyboard focus indicators. */
+/* The static panel receives initial focus for modal navigation, so it needs a
+ * visible cue before keyboard users tab into one of its child controls. */
 .focusTarget:focus {
-  outline: none;
+  outline: 2px solid var(--accent, var(--border-strong));
+  outline-offset: 2px;
 }
 
 :where(.dialog) {

@@ -1,6 +1,6 @@
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { connect } from 'node:net';
 import type { AddressInfo } from 'node:net';
@@ -11,6 +11,7 @@ import {
   buildMotionReference,
   isDownloaderHost,
   MotionReferenceError,
+  MOTION_REFERENCE_ROOT,
   parseCuts,
   parseProbe,
   pickFrameTimes,
@@ -214,6 +215,26 @@ describe('buildMotionReference', () => {
   it('refuses paths outside the project and non-video files', async () => {
     await expect(buildMotionReference({ projectDir: project, source: '../etc/passwd', id: 'd' })).rejects.toBeInstanceOf(MotionReferenceError);
     await expect(buildMotionReference({ projectDir: project, source: 'notes.txt', id: 'e' })).rejects.toMatchObject({ code: 'NOT_VIDEO' });
+  });
+
+  it('does not delete output reached through an external symlink', async () => {
+    const attackProject = path.join(project, 'symlink-output-case');
+    const outside = await mkdtemp(path.join(os.tmpdir(), 'motion-ref-outside-'));
+    const outsideRun = path.join(outside, 'a');
+    await mkdir(attackProject, { recursive: true });
+    await mkdir(outsideRun, { recursive: true });
+    await writeFile(path.join(outsideRun, 'keep.txt'), 'keep');
+    await symlink(outside, path.join(attackProject, MOTION_REFERENCE_ROOT), 'dir');
+
+    try {
+      await expect(buildMotionReference({ projectDir: attackProject, source: 'missing.mp4', id: 'a' }))
+        .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(readFile(path.join(outsideRun, 'keep.txt'), 'utf8')).resolves.toBe('keep');
+    } finally {
+      await rm(path.join(attackProject, MOTION_REFERENCE_ROOT), { force: true });
+      await rm(attackProject, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it('works in a brand-new project whose folder does not exist yet', async () => {

@@ -4,10 +4,10 @@ import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { McpSessionClient } from './mcp-session-client.ts';
+import { McpSessionClient } from './mcp-session-client.js';
 
 const exec = promisify(execFile);
-const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const digestFiles = ['apps/daemon/src/mcp.ts', 'apps/daemon/src/server.ts', 'apps/daemon/dist/mcp.js', 'apps/daemon/dist/server.js'] as const;
 type DigestFile = typeof digestFiles[number];
 export type ForkProfile = {
@@ -74,15 +74,15 @@ export function parseForkProfile(value: unknown, root = workspace): ForkProfile 
   };
 }
 
-async function verify(profile: ForkProfile): Promise<void> {
+async function verify(profile: ForkProfile, root = workspace): Promise<void> {
   for (const [name, location] of Object.entries({ dataDir: profile.dataDir, toolsDevRoot: profile.toolsDevRoot, nodeExecutable: profile.nodeExecutable })) {
-    scratchPath(await realpath(location), name, await realpath(workspace));
+    scratchPath(await realpath(location), name, await realpath(root));
   }
   for (const file of digestFiles) {
-    const actual = createHash('sha256').update(await readFile(path.join(workspace, file))).digest('hex');
+    const actual = createHash('sha256').update(await readFile(path.join(root, file))).digest('hex');
     if (actual !== profile.hashes[file]) throw new Error(`Build drift at ${file}; rebuild and review the profile explicitly`);
   }
-  await exec('git', ['merge-base', '--is-ancestor', profile.buildRevision, 'HEAD'], { cwd: workspace });
+  await exec('git', ['merge-base', '--is-ancestor', profile.buildRevision, 'HEAD'], { cwd: root });
   const { stdout } = await exec(profile.nodeExecutable, ['--version']);
   if (!/^v24\./.test(stdout.trim())) throw new Error('Profile requires an existing Node 24 executable');
 }
@@ -96,49 +96,48 @@ function environment(profile: ForkProfile): NodeJS.ProcessEnv {
   };
 }
 
-async function lifecycle(profile: ForkProfile, action: 'start' | 'status' | 'stop', app = 'web'): Promise<unknown> {
-  const args = [path.join(workspace, 'tools/dev/bin/tools-dev.mjs'), action, app,
+async function lifecycle(profile: ForkProfile, action: 'start' | 'status' | 'stop', app = 'web', root = workspace): Promise<unknown> {
+  const args = ['tools-dev', action, app,
     '--namespace', profile.namespace, '--tools-dev-root', profile.toolsDevRoot, '--no-env-file', '--json'];
   if (action === 'start') args.push('--daemon-port', String(profile.daemonPort), '--web-port', String(profile.webPort));
-  const { stdout } = await exec(profile.nodeExecutable, args, { cwd: workspace, env: environment(profile), maxBuffer: 1024 * 1024 });
+  const { stdout } = await exec('pnpm', args, { cwd: root, env: environment(profile), maxBuffer: 1024 * 1024 });
   return JSON.parse(stdout);
 }
 
-async function ready(profile: ForkProfile): Promise<void> {
+async function ready(profile: ForkProfile, root = workspace): Promise<void> {
   for (const [app, port] of [['daemon', profile.daemonPort], ['web', profile.webPort]] as const) {
-    const state = await lifecycle(profile, 'status', app);
+    const state = await lifecycle(profile, 'status', app, root);
     if (!record(state) || state.state !== 'running' || state.url !== `http://127.0.0.1:${port}`) {
       throw new Error(`Expected ${app} is not running; use this launcher's start command first`);
     }
   }
 }
 
-function mcpArgs(profile: ForkProfile): string[] {
-  return [path.join(workspace, 'apps/daemon/dist/cli.js'), 'mcp', '--daemon-url', `http://127.0.0.1:${profile.daemonPort}`];
+function mcpArgs(profile: ForkProfile, root = workspace): string[] {
+  return [path.join(root, 'apps/daemon/dist/cli.js'), 'mcp', '--daemon-url', `http://127.0.0.1:${profile.daemonPort}`];
 }
 
-function transport(profile: ForkProfile) {
-  return spawn(profile.nodeExecutable, mcpArgs(profile), {
-    cwd: workspace,
+function transport(profile: ForkProfile, root = workspace) {
+  return spawn(profile.nodeExecutable, mcpArgs(profile, root), {
+    cwd: root,
     env: environment(profile),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 }
 
-async function main(): Promise<void> {
-  const [profileFlag, filename, action] = process.argv.slice(2);
-  if (profileFlag !== '--profile' || !filename || !['start', 'status', 'stop', 'check', 'stdio'].includes(action ?? '')) {
-    throw new Error('Usage: node scripts/open-design-fork.ts --profile <reviewed-profile.json> <start|status|stop|check|stdio>');
+export async function runForkProfile(action: string, filename: string | undefined, root = workspace): Promise<void> {
+  if (!filename || !['start', 'status', 'stop', 'check', 'stdio'].includes(action)) {
+    throw new Error('Usage: pnpm tools-dev fork-profile <start|status|stop|check|stdio> --profile <reviewed-profile.json>');
   }
-  const profile = parseForkProfile(JSON.parse(await readFile(filename, 'utf8')));
-  await verify(profile);
+  const profile = parseForkProfile(JSON.parse(await readFile(filename, 'utf8')), root);
+  await verify(profile, root);
   if (action === 'start' || action === 'status' || action === 'stop') {
-    console.log(JSON.stringify(await lifecycle(profile, action), null, 2));
+    console.log(JSON.stringify(await lifecycle(profile, action, action === 'stop' ? 'all' : 'web', root), null, 2));
     return;
   }
-  await ready(profile);
+  await ready(profile, root);
   if (action === 'stdio') {
-    const child = spawn(profile.nodeExecutable, mcpArgs(profile), {cwd: workspace, env: environment(profile), stdio: 'inherit'});
+    const child = spawn(profile.nodeExecutable, mcpArgs(profile, root), {cwd: root, env: environment(profile), stdio: 'inherit'});
     const forward = (signal: NodeJS.Signals) => child.kill(signal);
     const interrupt = () => forward('SIGINT');
     const terminate = () => forward('SIGTERM');
@@ -155,7 +154,7 @@ async function main(): Promise<void> {
     }
     return;
   }
-  const child = transport(profile);
+  const child = transport(profile, root);
   if (!child.stdin || !child.stdout || !child.stderr) throw new Error('Expected piped MCP transport');
   const client = await McpSessionClient.connect(child);
   try {
@@ -173,11 +172,4 @@ async function main(): Promise<void> {
   } finally {
     await client.close();
   }
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch(error => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
 }

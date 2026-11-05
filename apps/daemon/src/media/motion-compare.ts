@@ -7,6 +7,7 @@ import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { spawn } from 'node:child_process';
 import { lstat, mkdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { resolveProjectWritePathFromDir } from '../projects.js';
 
 export const MOTION_COMPARE_ROOT = '.motion-compare';
 const MAX_TIMES = 12;
@@ -152,7 +153,15 @@ export async function compareMotionFilms(input: {
   }
 
   const relDir = path.posix.join(MOTION_COMPARE_ROOT, id);
-  const dir = path.join(projectDir, MOTION_COMPARE_ROOT, id);
+  let dir: string;
+  try {
+    dir = await resolveProjectWritePathFromDir(projectDir, relDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EPATHESCAPE') {
+      throw new MotionCompareError('BAD_REQUEST', 'output path must stay inside the project');
+    }
+    throw error;
+  }
   await rm(dir, { recursive: true, force: true });
   await mkdir(path.join(dir, 'frames'), { recursive: true });
 

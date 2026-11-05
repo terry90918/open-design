@@ -3,6 +3,7 @@ import { lstat, mkdir, open, readdir, rm, symlink, writeFile, type FileHandle } 
 import path from "node:path";
 
 import { cac } from "cac";
+import { runForkProfile } from "./fork-profile.js";
 
 import {
   APP_KEYS,
@@ -80,6 +81,7 @@ type CliOptions = ToolDevOptions & {
   noEnvFile?: boolean;
   parentPid?: number;
   path?: string;
+  profile?: string;
   selector?: string;
   timeout?: string;
   updateAction?: string;
@@ -1152,6 +1154,14 @@ async function runForeground(config: ToolDevConfig, appName: string | undefined,
 }
 
 const cli = cac("tools-dev");
+
+cli.command("fork-profile <action>", "Operate a reviewed isolated fork profile")
+  .option("--profile <file>", "reviewed fork profile JSON")
+  .option("--no-env-file", "skip workspace .env files", { default: false })
+  .action(async (action: string, options: CliOptions) => {
+    if (!process.argv.slice(2).includes("--no-env-file")) throw new Error("fork-profile requires --no-env-file");
+    await runForkProfile(action, options.profile);
+  });
 
 function addSharedOptions(command: ReturnType<typeof cli.command>) {
   return command

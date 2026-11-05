@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
-import { parseForkProfile } from '../../../scripts/open-design-fork.ts';
+import { parseForkProfile } from '../../../tools/dev/src/fork-profile.ts';
 
 function profile() {
   return {

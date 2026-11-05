@@ -4,7 +4,7 @@ This fork adds an opt-in diagnostic client and an optional MCP reasoning selecto
 
 ## Keep a workflow on one connection
 
-Import `connectRegisteredOpenDesign` from `scripts/mcp-session-client.ts`, connect once, and retain the returned client through brief collection, confirmation, agent discovery, project selection, run creation, and polling. Close it in `finally` after terminal delivery or an explicit boundary. Call only advertised tools with their current schemas.
+Import `connectRegisteredOpenDesign` from `tools/dev/src/mcp-session-client.ts`, connect once, and retain the returned client through brief collection, confirmation, agent discovery, project selection, run creation, and polling. Close it in `finally` after terminal delivery or an explicit boundary. Call only advertised tools with their current schemas.
 
 A timeout means the outcome is uncertain. The client never resends the request or opens another connection automatically. For a generation retry, the caller must retain the original byte-identical arguments and request identifier, inspect the previous outcome, and follow the installed plugin's workflow rules. Do not persist brief nonces or signed envelopes in source control.
 

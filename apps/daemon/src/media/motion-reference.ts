@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { resolveYtDlp } from './yt-dlp.js';
 import { assertPublicAssetUrl, fetchPublicAsset } from '../public-asset-fetch.js';
 import { startEgressProxy } from './egress-proxy.js';
+import { resolveProjectWritePathFromDir } from '../projects.js';
 import { createWriteStream } from 'node:fs';
 import { copyFile, lstat, mkdir, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -239,7 +240,15 @@ export async function buildMotionReference(input: { projectDir: string; source: 
   await mkdir(input.projectDir, { recursive: true });
   const projectDir = await realpath(input.projectDir);
   const relDir = path.posix.join(MOTION_REFERENCE_ROOT, id);
-  const dir = path.join(projectDir, MOTION_REFERENCE_ROOT, id);
+  let dir: string;
+  try {
+    dir = await resolveProjectWritePathFromDir(projectDir, relDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EPATHESCAPE') {
+      throw new MotionReferenceError('BAD_REQUEST', 'output path must stay inside the project');
+    }
+    throw error;
+  }
   await rm(dir, { recursive: true, force: true });
   await mkdir(path.join(dir, 'frames'), { recursive: true });
 

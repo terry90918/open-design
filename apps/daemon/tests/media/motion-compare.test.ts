@@ -117,6 +117,28 @@ describe('compareMotionFilms', () => {
       .rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
+  it('does not delete output reached through an external symlink', async () => {
+    const attackProject = path.join(project, 'symlink-output-case');
+    const outside = await mkdtemp(path.join(os.tmpdir(), 'motion-cmp-outside-'));
+    const outsideRun = path.join(outside, 'e');
+    await mkdir(attackProject, { recursive: true });
+    await mkdir(outsideRun, { recursive: true });
+    await writeFile(path.join(outsideRun, 'keep.txt'), 'keep');
+    await copyFile(path.join(project, 'ref.mp4'), path.join(attackProject, 'ref.mp4'));
+    await copyFile(path.join(project, 'same.mp4'), path.join(attackProject, 'same.mp4'));
+    await symlink(outside, path.join(attackProject, '.motion-compare'), 'dir');
+
+    try {
+      await expect(compareMotionFilms({ projectDir: attackProject, reference: 'ref.mp4', candidate: 'same.mp4', times: [0.5], id: 'e' }))
+        .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(readFile(path.join(outsideRun, 'keep.txt'), 'utf8')).resolves.toBe('keep');
+    } finally {
+      await rm(path.join(attackProject, '.motion-compare'), { force: true });
+      await rm(attackProject, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it('works in a project whose only files sit at the top level', async () => {
     const fresh = path.join(project, 'fresh');
     await mkdir(fresh, { recursive: true });
