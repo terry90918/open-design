@@ -838,6 +838,28 @@ export async function resolveProjectDeletePath(projectsRoot, projectId, name, me
 
 // Like readProjectFile but skips loading the file content into memory.
 // Used by the media streaming endpoint so large video files are never buffered.
+/** Resolve an existing or future output through a project's symlink-aware boundary. */
+export async function resolveProjectWritePathFromDir(projectDir, name) {
+  return resolveSafeReal(projectDir, name);
+}
+
+/** Resolve generated output only at its declared path; aliases through project symlinks are not owned output. */
+export async function resolveProjectOutputPath(projectDir, name) {
+  const candidate = resolveSafe(projectDir, name);
+  const resolved = await resolveSafeReal(projectDir, name);
+  if (resolved !== candidate) {
+    const err = new Error('generated output path must not resolve through a symlink');
+    err.code = 'EPATHESCAPE';
+    throw err;
+  }
+  return resolved;
+}
+
+export async function resolveProjectWritePath(projectsRoot, projectId, name, metadata?) {
+  assertVisibleForImportedProject(name, metadata);
+  return resolveProjectWritePathFromDir(resolveProjectDir(projectsRoot, projectId, metadata), name);
+}
+
 export async function resolveProjectFilePath(projectsRoot, projectId, name, metadata?) {
   assertVisibleForImportedProject(name, metadata);
   const dir = resolveProjectDir(projectsRoot, projectId, metadata);

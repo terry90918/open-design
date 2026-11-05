@@ -94,6 +94,33 @@ describe('local MCP plugin observability contract', () => {
     })).toThrow(/PLUGIN_CONTRACT_REJECTED/u);
   });
 
+  it('accepts workflow attribution on project file tools without allowing extra fields', () => {
+    const pluginWorkflowId = '018f6f2e-4444-7444-8444-444444444444';
+    const cases = [
+      ['get_project', { project: 'jurislm-app' }],
+      ['get_file', { project: 'jurislm-app', path: 'SCREEN-INDEX.md' }],
+      ['list_files', { project: 'jurislm-app' }],
+      ['search_files', { project: 'jurislm-app', query: 'admin' }],
+      ['create_artifact', { project: 'jurislm-app', name: 'test.html', content: '<p>test</p>' }],
+      ['write_file', { project: 'jurislm-app', path: 'test.html', content: '<p>test</p>' }],
+      ['delete_file', { project: 'jurislm-app', path: 'test.html' }],
+    ] as const;
+
+    for (const [name, args] of cases) {
+      expect(() => validateMcpToolArgs(name, {
+        ...args,
+        pluginWorkflowId,
+      })).not.toThrow();
+    }
+
+    expect(() => validateMcpToolArgs('get_file', {
+      project: 'jurislm-app',
+      path: 'SCREEN-INDEX.md',
+      pluginWorkflowId,
+      apiKey: 'must-never-cross-mcp',
+    })).toThrow(/PLUGIN_CONTRACT_REJECTED/u);
+  });
+
   it('keeps Codex host variants bounded until a real host smoke proves a stable split', () => {
     expect(mapMcpHostProduct({ name: 'codex', version: '1.2.3' })).toBe(
       'codex_unknown',

@@ -91,7 +91,7 @@ interface ProjectPayload { project?: ProjectSummary; id?: string; name?: string;
 interface ActiveContext { active?: boolean; projectId?: string; projectName?: string | null; fileName?: string | null; ageMs?: number | null }
 type ResolvedProject = { id: string; name: string; source: 'uuid' | 'id' | 'exact' | 'slug' | 'substring' };
 interface ProjectListCache { baseUrl: string; t: number; list: ProjectSummary[] }
-interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; serviceTier?: unknown; apiKey?: unknown; requestId?: unknown; resume?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; skills?: string[]; includeUnavailable?: unknown; artifactType?: unknown; projectTitle?: unknown; locale?: unknown; knownAnswers?: unknown; skip?: unknown; briefDraftId?: unknown; nonce?: unknown; answers?: unknown; externalPluginContext?: unknown; pluginWorkflowId?: unknown }
+interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; reasoning?: unknown; serviceTier?: unknown; apiKey?: unknown; requestId?: unknown; resume?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; skills?: string[]; includeUnavailable?: unknown; artifactType?: unknown; projectTitle?: unknown; locale?: unknown; knownAnswers?: unknown; skip?: unknown; briefDraftId?: unknown; nonce?: unknown; answers?: unknown; externalPluginContext?: unknown; pluginWorkflowId?: unknown }
 interface ProjectFileBundleEntry { name: string; mime: string; size: number | null; content: string | null; binary: boolean }
 interface BundleInput { project: ProjectPayload | ProjectSummary; entry: string; files: ProjectFileBundleEntry[]; truncated: boolean; skippedFileCount?: number; active: ActiveContext | null; resolved?: ResolvedProject | null }
 interface ErrorWithCode { message?: string; code?: string; cause?: { code?: string } }
@@ -501,7 +501,10 @@ export const TOOL_DEFS = [
       'Single project metadata: name, active skill/design-system ids, entryFile, kind, timestamps, resolvedDir, and (when it has an entry file) a browser-openable previewUrl.',
     inputSchema: {
       type: 'object',
-      properties: { project: PROJECT_ARG },
+      properties: {
+        project: PROJECT_ARG,
+        pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG,
+      },
       additionalProperties: false,
     },
     annotations: { ...READ_ANNOTATIONS, title: 'Get OpenDesign project' },
@@ -527,6 +530,7 @@ export const TOOL_DEFS = [
           type: 'number',
           description: 'Maximum number of lines to return. Defaults to 2000.',
         },
+        pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG,
       },
       additionalProperties: false,
     },
@@ -552,6 +556,7 @@ export const TOOL_DEFS = [
           type: 'number',
           description: 'Cap on matches (default 200, hard cap 1000).',
         },
+        pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG,
       },
       required: ['query'],
       additionalProperties: false,
@@ -570,6 +575,7 @@ export const TOOL_DEFS = [
           type: 'number',
           description: 'Unix-ms; only return files with mtime > since.',
         },
+        pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG,
       },
       additionalProperties: false,
     },
@@ -601,6 +607,7 @@ export const TOOL_DEFS = [
           additionalProperties: true,
           description: 'Optional ArtifactManifest sidecar. If omitted, OpenDesign infers one for HTML, Markdown, or SVG entry files.',
         },
+        pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG,
       },
       required: ['name', 'content'],
       additionalProperties: false,
@@ -628,6 +635,7 @@ export const TOOL_DEFS = [
           enum: ['utf8', 'base64'],
           description: 'utf8 (default) | base64',
         },
+        pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG,
       },
       required: ['path', 'content'],
       additionalProperties: false,
@@ -646,6 +654,7 @@ export const TOOL_DEFS = [
           type: 'string',
           description: 'Project-relative path of the file to delete.',
         },
+        pluginWorkflowId: PLUGIN_WORKFLOW_ID_ARG,
       },
       required: ['path'],
       additionalProperties: false,
@@ -793,6 +802,10 @@ export const TOOL_DEFS = [
         model: {
           type: 'string',
           description: 'Model id override for the run. Optional.',
+        },
+        reasoning: {
+          type: 'string',
+          description: "Reasoning effort override for the selected runtime and model, e.g. 'medium' for Codex. Optional; omitted or 'default' preserves runtime defaults. Supported values depend on the runtime and model and are validated by the runner.",
         },
         serviceTier: {
           type: 'string',
@@ -2676,6 +2689,9 @@ async function startRun(
   if (typeof args.plugin === 'string' && args.plugin.length > 0) body.pluginId = args.plugin;
   if (typeof args.agent === 'string' && args.agent.length > 0) body.agentId = args.agent;
   if (typeof args.model === 'string' && args.model.length > 0) body.model = args.model;
+  if (typeof args.reasoning === 'string' && args.reasoning.length > 0) {
+    body.reasoning = args.reasoning;
+  }
   if (typeof args.serviceTier === 'string' && args.serviceTier.length > 0) {
     body.serviceTier = args.serviceTier;
   }
