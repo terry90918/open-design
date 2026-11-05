@@ -134,6 +134,40 @@ describe('company stock search and authorized local downloads', () => {
     ]));
   });
 
+  it('keeps a concurrently replaced image paired with its own attribution', async () => {
+    let creditsResolvers = 0;
+    let releaseCredits!: () => void;
+    const bothCreditsResolvers = new Promise<void>((resolve) => { releaseCredits = resolve; });
+    const resolveOutputPath = async (relativePath: string) => {
+      if (relativePath.endsWith('/credits.json')) {
+        creditsResolvers += 1;
+        if (creditsResolvers === 2) releaseCredits();
+        await bothCreditsResolvers;
+      }
+      return path.resolve(cwd, relativePath);
+    };
+    const request = (marker: 'A' | 'B', author: string) => stockSearch({
+      cwd,
+      slots: [{ id: 'shared-slot', query: 'dog' }],
+      search: async () => ({ providers: ['pexels'], slots: [{ ...candidate('shared-slot'), author,
+        sourceUrl: `https://www.pexels.com/photo/${marker}/`, license: `License ${marker}` }] }),
+      fetch: (async () => new Response(new Uint8Array(Buffer.concat([JPEG, Buffer.from(marker)])))) as typeof fetch,
+      resolveOutputPath,
+    });
+
+    await Promise.all([request('A', 'Alice'), request('B', 'Bianca')]);
+    const image = await readFile(path.join(cwd, 'assets/stock/shared-slot.jpg'));
+    const credits = JSON.parse(await readFile(path.join(cwd, 'assets/stock/credits.json'), 'utf8')) as Array<{
+      path: string; author: string; license: string; sourceUrl: string;
+    }>;
+    const credit = credits.find(entry => entry.path === 'assets/stock/shared-slot.jpg');
+    if (!credit) throw new Error('expected a credit for the shared image path');
+    const marker = String.fromCharCode(image.at(-1)!);
+    expect(marker).toBe(credit.sourceUrl.includes('/A/') ? 'A' : 'B');
+    expect(credit.author).toBe(marker === 'A' ? 'Alice' : 'Bianca');
+    expect(credit.license).toBe(`License ${marker}`);
+  });
+
   it.each([{ concurrency: 0 }, { budgetMs: Infinity }, { requestTimeoutMs: -1 }])('rejects invalid execution limits %j', async (limits) => {
     const search = vi.fn(async () => report());
     await expect(stockSearch({ cwd, slots: [{ id: 'hero', query: 'dog' }], search, ...limits })).rejects.toThrow('positive integer');

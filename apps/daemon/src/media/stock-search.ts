@@ -160,10 +160,11 @@ export async function stockSearch(options: StockSearchOptions): Promise<StockSea
       const size = imageSize(buf);
       if (!size || size.width < 1 || size.height < 1) throw new Error('invalid stock image content');
       const rel = path.posix.join(outDir.split(path.sep).join('/'), slotFileName(slot.id));
-      await writeFile(await resolveOutputPath(rel), buf);
-      record('ok');
-      return { ...base, status: 'ok', provider, path: rel, ...size, bytes: buf.length,
+      const saved: StockSlotResult = { ...base, status: 'ok', provider, path: rel, ...size, bytes: buf.length,
         alt: candidate.alt ?? '', ...(candidate.author ? { author: candidate.author } : {}), ...(candidate.authorUrl ? { authorUrl: candidate.authorUrl } : {}), sourceUrl: candidate.sourceUrl ?? '', license: candidate.license ?? '' };
+      await writeStockImageAndCredits(rel, path.posix.join(outDir.split(path.sep).join('/'), 'credits.json'), buf, saved, resolveOutputPath);
+      record('ok');
+      return saved;
     } catch (error) {
       // Fixed diagnostics keep arbitrary upstream/body/filesystem text out of tool output.
       const timeout = error instanceof Error && /timeout|abort/i.test(error.name);
@@ -173,31 +174,40 @@ export async function stockSearch(options: StockSearchOptions): Promise<StockSea
       return { ...base, status: now() >= deadline ? 'budget_exceeded' : 'error', error: message };
     }
   });
-  await writeCredits(path.posix.join(outDir, 'credits.json'), results.filter(r => r.status === 'ok'), resolveOutputPath);
   return { providers: report.providers, slots: results };
 }
 
-async function writeCredits(file: string, fresh: StockSlotResult[], resolveOutputPath: (relativePath: string) => Promise<string>): Promise<void> {
-  if (fresh.length === 0) return;
-  // Resolve before the read catch so a rejected symlink cannot be treated as a missing file.
-  const target = await resolveOutputPath(file);
-  await withCreditsWriteLock(target, async () => {
-    let existing: Array<Partial<StockSlotResult>> = [];
-    try {
-      const parsed = JSON.parse(await readFile(target, 'utf8'));
-      if (Array.isArray(parsed)) existing = parsed;
-    } catch {
-      // No prior credits file.
-    }
-    const byPath = new Map<string | undefined, Partial<StockSlotResult> | Record<string, unknown>>(
-      existing.map((entry) => [entry.path, entry]),
-    );
-    for (const entry of fresh) {
-      byPath.set(entry.path, {
-        id: entry.id, query: entry.query, status: entry.status, provider: entry.provider, path: entry.path,
-        alt: entry.alt, author: entry.author, authorUrl: entry.authorUrl, sourceUrl: entry.sourceUrl, license: entry.license,
-      });
-    }
-    await writeFile(target, `${JSON.stringify([...byPath.values()], null, 2)}\n`);
+async function writeStockImageAndCredits(
+  imageFile: string,
+  creditsFile: string,
+  image: Buffer,
+  fresh: StockSlotResult,
+  resolveOutputPath: (relativePath: string) => Promise<string>,
+): Promise<void> {
+  // Resolve both paths before the read catch so rejected symlinks are never treated as missing files.
+  const [imageTarget, creditsTarget] = await Promise.all([resolveOutputPath(imageFile), resolveOutputPath(creditsFile)]);
+  await withCreditsWriteLock(creditsTarget, async () => {
+    await writeFile(imageTarget, image);
+    await mergeCreditsAtTarget(creditsTarget, [fresh]);
   });
+}
+
+async function mergeCreditsAtTarget(target: string, fresh: StockSlotResult[]): Promise<void> {
+  let existing: Array<Partial<StockSlotResult>> = [];
+  try {
+    const parsed = JSON.parse(await readFile(target, 'utf8'));
+    if (Array.isArray(parsed)) existing = parsed;
+  } catch {
+    // No prior credits file.
+  }
+  const byPath = new Map<string | undefined, Partial<StockSlotResult> | Record<string, unknown>>(
+    existing.map((entry) => [entry.path, entry]),
+  );
+  for (const entry of fresh) {
+    byPath.set(entry.path, {
+      id: entry.id, query: entry.query, status: entry.status, provider: entry.provider, path: entry.path,
+      alt: entry.alt, author: entry.author, authorUrl: entry.authorUrl, sourceUrl: entry.sourceUrl, license: entry.license,
+    });
+  }
+  await writeFile(target, `${JSON.stringify([...byPath.values()], null, 2)}\n`);
 }
