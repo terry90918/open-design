@@ -19,6 +19,22 @@ export type StockSearchOptions = StockSearchRequest & {
 export class StockSearchServiceError extends Error {}
 export class StockSearchInputError extends Error {}
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const creditsWriteQueues = new Map<string, Promise<void>>();
+
+async function withCreditsWriteLock<T>(filePath: string, write: () => Promise<T>): Promise<T> {
+  const previous = creditsWriteQueues.get(filePath) ?? Promise.resolve();
+  let release!: () => void;
+  const turn = new Promise<void>((resolve) => { release = resolve; });
+  const queued = previous.catch(() => {}).then(() => turn);
+  creditsWriteQueues.set(filePath, queued);
+  await previous.catch(() => {});
+  try {
+    return await write();
+  } finally {
+    release();
+    if (creditsWriteQueues.get(filePath) === queued) creditsWriteQueues.delete(filePath);
+  }
+}
 
 function slotFileName(id: string): string {
   const safe = id.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
@@ -165,21 +181,23 @@ async function writeCredits(file: string, fresh: StockSlotResult[], resolveOutpu
   if (fresh.length === 0) return;
   // Resolve before the read catch so a rejected symlink cannot be treated as a missing file.
   const target = await resolveOutputPath(file);
-  let existing: Array<Partial<StockSlotResult>> = [];
-  try {
-    const parsed = JSON.parse(await readFile(target, 'utf8'));
-    if (Array.isArray(parsed)) existing = parsed;
-  } catch {
-    // No prior credits file.
-  }
-  const byPath = new Map<string | undefined, Partial<StockSlotResult> | Record<string, unknown>>(
-    existing.map((entry) => [entry.path, entry]),
-  );
-  for (const entry of fresh) {
-    byPath.set(entry.path, {
-      id: entry.id, query: entry.query, status: entry.status, provider: entry.provider, path: entry.path,
-      alt: entry.alt, author: entry.author, authorUrl: entry.authorUrl, sourceUrl: entry.sourceUrl, license: entry.license,
-    });
-  }
-  await writeFile(await resolveOutputPath(file), `${JSON.stringify([...byPath.values()], null, 2)}\n`);
+  await withCreditsWriteLock(target, async () => {
+    let existing: Array<Partial<StockSlotResult>> = [];
+    try {
+      const parsed = JSON.parse(await readFile(target, 'utf8'));
+      if (Array.isArray(parsed)) existing = parsed;
+    } catch {
+      // No prior credits file.
+    }
+    const byPath = new Map<string | undefined, Partial<StockSlotResult> | Record<string, unknown>>(
+      existing.map((entry) => [entry.path, entry]),
+    );
+    for (const entry of fresh) {
+      byPath.set(entry.path, {
+        id: entry.id, query: entry.query, status: entry.status, provider: entry.provider, path: entry.path,
+        alt: entry.alt, author: entry.author, authorUrl: entry.authorUrl, sourceUrl: entry.sourceUrl, license: entry.license,
+      });
+    }
+    await writeFile(target, `${JSON.stringify([...byPath.values()], null, 2)}\n`);
+  });
 }

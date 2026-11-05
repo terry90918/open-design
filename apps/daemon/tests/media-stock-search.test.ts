@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promises as dns } from 'node:dns';
@@ -105,6 +105,33 @@ describe('company stock search and authorized local downloads', () => {
     expect(new Set(result.slots.map(slot => slot.path)).size).toBe(ids.length);
     await stockSearch({ cwd, slots: [{ id: 'extra', query: 'dog' }], search: async () => report(['extra']), fetch: fetchImage() });
     expect(JSON.parse(await readFile(path.join(cwd, 'assets/stock/credits.json'), 'utf8'))).toHaveLength(7);
+  });
+
+  it('preserves attribution when concurrent searches update the same credits file', async () => {
+    const creditsPath = path.join(cwd, 'assets/stock/credits.json');
+    await mkdir(path.dirname(creditsPath), { recursive: true });
+    await writeFile(creditsPath, JSON.stringify([{ id: 'existing', path: 'assets/stock/existing.jpg', author: 'Old', license: 'Existing license' }]));
+
+    let creditsResolvers = 0;
+    let releaseCredits!: () => void;
+    const bothCreditsResolvers = new Promise<void>((resolve) => { releaseCredits = resolve; });
+    const resolveOutputPath = async (relativePath: string) => {
+      if (relativePath.endsWith('/credits.json')) {
+        creditsResolvers += 1;
+        if (creditsResolvers === 2) releaseCredits();
+        await bothCreditsResolvers;
+      }
+      return path.resolve(cwd, relativePath);
+    };
+    const run = (id: string) => stockSearch({ cwd, slots: [{ id, query: 'dog' }], search: async () => report([id]),
+      fetch: fetchImage(), resolveOutputPath });
+
+    const results = await Promise.all([run('batch-one'), run('batch-two')]);
+    expect(results.flatMap(result => result.slots).map(slot => slot.status)).toEqual(['ok', 'ok']);
+    const credits = JSON.parse(await readFile(creditsPath, 'utf8')) as Array<{ path: string }>;
+    expect(credits.map(entry => entry.path)).toEqual(expect.arrayContaining([
+      'assets/stock/existing.jpg', 'assets/stock/batch-one.jpg', 'assets/stock/batch-two.jpg',
+    ]));
   });
 
   it.each([{ concurrency: 0 }, { budgetMs: Infinity }, { requestTimeoutMs: -1 }])('rejects invalid execution limits %j', async (limits) => {
