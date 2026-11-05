@@ -73,4 +73,14 @@ describe("tools-dev CLI argument rewriting", () => {
     assert.match(result.stderr, /Usage: pnpm tools-dev fork-profile/);
     assert.doesNotMatch(result.stderr, /requires --no-env-file/);
   });
+
+  it("rejects a fork-profile environment guard after the option terminator", () => {
+    const result = spawnSync(process.execPath, ["--import", "tsx", "src/index.ts", "fork-profile", "check", "--", "--no-env-file"], {
+      cwd: toolsDevRoot,
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /fork-profile requires --no-env-file/);
+  });
 });

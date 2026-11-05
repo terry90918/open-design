@@ -1159,7 +1159,6 @@ cli.command("fork-profile <action>", "Operate a reviewed isolated fork profile")
   .option("--profile <file>", "reviewed fork profile JSON")
   .option("--no-env-file", "skip workspace .env files", { default: false })
   .action(async (action: string, options: CliOptions) => {
-    if (!process.argv.slice(2).includes("--no-env-file")) throw new Error("fork-profile requires --no-env-file");
     await runForkProfile(action, options.profile);
   });
 
@@ -1273,6 +1272,11 @@ cli.help();
 
 const rawCliArgs = process.argv.slice(2);
 const cliArgs = rawCliArgs[0] === "--" ? rawCliArgs.slice(1) : rawCliArgs;
+if (cliArgs[0] === "fork-profile") {
+  const optionsEnd = cliArgs.indexOf("--");
+  const options = optionsEnd === -1 ? cliArgs : cliArgs.slice(0, optionsEnd);
+  if (!options.includes("--no-env-file")) exitWithError(new Error("fork-profile requires --no-env-file"));
+}
 loadWorkspaceLocalEnv({
   args: cliArgs,
   log: (message) => process.stderr.write(`${message}\n`),
