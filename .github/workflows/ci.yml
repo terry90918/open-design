@@ -35,11 +35,13 @@ concurrency:
 jobs:
   runners:
     name: Resolve runner profiles
-    # Resolve on the Nexu ARC fleet for trusted branches, but preserve the
-    # hosted bootstrap path for external forks and explicit economic mode.
+    # Fork-targeted and external-fork PRs use GitHub-hosted runners; trusted
+    # upstream PRs can continue to use the configured runner pool.
     runs-on: >-
       ${{ ((github.event_name == 'pull_request'
-        && github.event.pull_request.head.repo.full_name != github.repository)
+        && (github.event.repository.fork
+          || github.event.pull_request.head.repo.full_name != github.repository))
+        || (github.event_name == 'merge_group' && github.event.repository.fork)
         || vars.OD_CI_RUNNER_MODE == 'economic')
         && 'ubuntu-24.04'
         || (vars.OD_CI_RUNNER_MODE == 'blacksmith'
@@ -56,11 +58,13 @@ jobs:
       - name: Resolve runner profiles
         id: runners
         env:
-          # Fork PRs cannot rely on repository variables, so keep their required
-          # validation on GitHub-hosted runners even when private pools are down.
+          # Fork-targeted and external-fork validation stays on the hosted
+          # profiles; repository runner variables must not select a private pool.
           OD_CI_RUNNER_MODE: >-
-            ${{ github.event_name == 'pull_request'
-              && github.event.pull_request.head.repo.full_name != github.repository
+            ${{ ((github.event_name == 'pull_request'
+              && (github.event.repository.fork
+                || github.event.pull_request.head.repo.full_name != github.repository))
+              || (github.event_name == 'merge_group' && github.event.repository.fork))
               && 'economic'
               || vars.OD_CI_RUNNER_MODE }}
         run: python3 .github/scripts/runners.py
