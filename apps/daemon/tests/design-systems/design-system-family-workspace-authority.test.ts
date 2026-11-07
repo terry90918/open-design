@@ -393,8 +393,9 @@ describe('Design System route family exact Workspace authority', () => {
     );
     expect(page.status).toBe(200);
     const assetUrl = new URL('../assets/logo.png', page.url);
-    const asset = await fetch(assetUrl);
+    const asset = await fetch(assetUrl, { headers: { Origin: 'null' } });
     expect(asset.status).toBe(200);
+    expect(asset.headers.get('access-control-allow-origin')).toBe('*');
     expect(calls.static).toHaveBeenLastCalledWith(
       DESIGN_SYSTEM_ID,
       'assets/logo.png',
@@ -408,7 +409,9 @@ describe('Design System route family exact Workspace authority', () => {
     expect((await fetch(mismatchedQuery)).status).toBe(400);
     const otherMember = new URL(assetUrl);
     otherMember.pathname = otherMember.pathname.replace(MEMBER_ID, 'member-b');
-    expect((await fetch(otherMember)).status).toBe(403);
+    const denied = await fetch(otherMember, { headers: { Origin: 'null' } });
+    expect(denied.status).toBe(403);
+    expect(denied.headers.get('access-control-allow-origin')).toBeNull();
   });
 
   it('rejects bound mutations before their first side effect', async () => {

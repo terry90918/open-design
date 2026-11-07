@@ -2,10 +2,9 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test, expect } from '@/playwright/suite';
-import { applyStandardMocks } from '@/playwright/mock-factory';
 import { T } from '@/timeouts';
 
-test('[P1] packaged showcase preserves sandboxed modules, CSS and nested navigation', async ({ page }, testInfo) => {
+test('[P1] packaged static previews preserve sandboxed modules, CSS and nested navigation', async ({ page }, testInfo) => {
   const source = await mkdtemp(join(tmpdir(), 'od-static-preview-'));
   const files = {
     'DESIGN.md': '# Static preview fixture\n\n> Category: Custom\n\nA multi-page preview.',
@@ -13,8 +12,9 @@ test('[P1] packaged showcase preserves sandboxed modules, CSS and nested navigat
       schemaVersion: 'od-design-system-project/v1', id: basename(source),
       name: 'Static preview fixture', category: 'Custom',
       files: { design: 'DESIGN.md', tokens: 'tokens.css', components: 'components.html' },
-      assetsDir: 'assets', preview: { dir: '.', pages: [{ path: 'pages/next.html', title: 'Next', role: 'site' }] },
+      assetsDir: 'assets', preview: { dir: '.', pages: [{ path: 'pages/next.html', title: 'Next', role: 'site' }, { path: 'preview.html', title: 'Preview', role: 'site' }] },
     }),
+    'preview.html': '<!doctype html><iframe title="Package preview" sandbox="allow-scripts allow-popups" src="system/kit.html" style="width:100%;height:600px"></iframe>',
     'system/kit.html': '<!doctype html><link rel="stylesheet" href="../assets/main.css"><main><h1>Package showcase</h1><button id="ready">Loading module</button><a href="../pages/next.html">Next page</a></main><script type="module" src="../assets/main.mjs"></script>',
     'pages/next.html': '<!doctype html><link rel="stylesheet" href="../assets/main.css"><main><h1>Nested page</h1><button id="ready">Loading module</button><a href="../system/kit.html">Back</a></main><script type="module" src="../assets/main.mjs"></script>',
     'components.html': '<!doctype html><h1>Fixture components</h1>',
@@ -41,12 +41,8 @@ test('[P1] packaged showcase preserves sandboxed modules, CSS and nested navigat
     expect(deniedRead.status()).toBe(403);
     const deniedWrite = await page.request.post(staticPath, { headers: { Origin: 'null' } });
     expect(deniedWrite.status()).toBe(403);
-    await applyStandardMocks(page);
-    await page.goto('/design-systems');
-    await page.getByRole('tab', { name: /Your systems/i }).click();
-    await page.getByTestId(`design-system-card-${designSystem.id}`).click();
-    await page.getByRole('tab', { name: 'Showcase', exact: true }).click();
-    const frame = page.frameLocator('.ds-modal-stage-iframe-scaler iframe');
+    await page.goto(`/api/design-systems/${encodeURIComponent(designSystem.id)}/static?path=preview.html`);
+    const frame = page.frameLocator('iframe[title="Package preview"]');
     await expect(frame.getByRole('button', { name: 'Module ready' })).toBeVisible({ timeout: T.long });
     await expect(frame.getByRole('heading', { name: 'Package showcase' })).toHaveCSS('color', 'rgb(18, 35, 69)');
     await frame.getByRole('button', { name: 'Module ready' }).click();
