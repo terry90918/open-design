@@ -1203,6 +1203,7 @@ import {
   allowedBrowserPorts,
   configuredAllowedOrigins,
   isAllowedBrowserOrigin,
+  isSandboxedPreviewRead,
   isLocalSameOrigin,
   isZeroConfigClipperLibraryRequest,
   parseHostHeader,
@@ -3475,10 +3476,6 @@ export async function startServer({
     return null;
   }
 
-  // Routes that serve content to sandboxed iframes (Origin: null) for
-  // read-only purposes.  All other /api routes reject Origin: null.
-  const _NULL_ORIGIN_SAFE_GET_RE =
-    /^\/projects\/[^/]+\/(?:raw|preview)\/|^\/codex-pets\/[^/]+\/spritesheet$|^\/asset-cache$/;
   const _POWERED_PREVIEW_SAFE_RE = /^\/projects\/[^/]+\/powered\/.+$/u;
 
   // Reserve project preview hosts before API exceptions and static serving.
@@ -3553,7 +3550,7 @@ export async function startServer({
     // routes that set their own CORS headers for canvas drawing.
     if (origin === 'null') {
       const isSafeReadOnly =
-        req.method === 'GET' && _NULL_ORIGIN_SAFE_GET_RE.test(req.path);
+        isSandboxedPreviewRead(req.method, req.path);
       if (!isSafeReadOnly) {
         return res.status(403).json({ error: 'Origin: null not allowed for this route' });
       }
