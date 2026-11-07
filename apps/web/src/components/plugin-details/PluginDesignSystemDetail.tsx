@@ -24,6 +24,7 @@ import { localizePluginDescription, localizePluginTitle } from '../plugins-home/
 import {
   fetchDesignSystemPreview,
   fetchDesignSystemShowcase,
+  type DesignSystemShowcaseDocument,
   fetchPluginAssetText,
 } from '../../providers/registry';
 import { DesignSpecView } from '../DesignSpecView';
@@ -91,13 +92,13 @@ export function PluginDesignSystemDetail({
   const dsRef = designSystemRef(record);
   const assetPath = specAssetPath(record);
 
-  const [showcaseHtml, setShowcaseHtml] = useState<string | null | undefined>(undefined);
+  const [showcase, setShowcase] = useState<DesignSystemShowcaseDocument | null | undefined>(undefined);
   const [tokensHtml, setTokensHtml] = useState<string | null | undefined>(undefined);
   const [specBody, setSpecBody] = useState<string | null | undefined>(undefined);
 
   // Reset caches when the modal swaps to a different plugin.
   useEffect(() => {
-    setShowcaseHtml(undefined);
+    setShowcase(undefined);
     setTokensHtml(undefined);
     setSpecBody(undefined);
   }, [record.id]);
@@ -105,16 +106,16 @@ export function PluginDesignSystemDetail({
   const handleView = useCallback(
     (viewId: string) => {
       if (!dsRef) return;
-      if (viewId === 'showcase' && showcaseHtml === undefined) {
-        setShowcaseHtml(null);
-        void fetchDesignSystemShowcase(dsRef, workspaceContext).then((html) => setShowcaseHtml(html));
+      if (viewId === 'showcase' && showcase === undefined) {
+        setShowcase(null);
+        void fetchDesignSystemShowcase(dsRef, workspaceContext).then((html) => setShowcase(html));
       }
       if (viewId === 'tokens' && tokensHtml === undefined) {
         setTokensHtml(null);
         void fetchDesignSystemPreview(dsRef, workspaceContext).then((html) => setTokensHtml(html));
       }
     },
-    [dsRef, showcaseHtml, tokensHtml, workspaceContext],
+    [dsRef, showcase, tokensHtml, workspaceContext],
   );
 
   const handleSidebarToggle = useCallback(
@@ -135,7 +136,7 @@ export function PluginDesignSystemDetail({
   // from the primary CTA.
   const views: PreviewView[] = dsRef
     ? [
-        { id: 'showcase', label: t('ds.showcase'), html: showcaseHtml },
+        { id: 'showcase', label: t('ds.showcase'), html: showcase?.html, baseHref: showcase?.baseHref },
         { id: 'tokens', label: t('ds.tokens'), html: tokensHtml },
       ]
     : [

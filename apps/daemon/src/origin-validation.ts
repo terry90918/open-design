@@ -1,3 +1,10 @@
+export function isSandboxedPreviewRead(method: string, pathname: string): boolean {
+  return method === 'GET' && (
+    /^\/projects\/[^/]+\/(?:raw|preview)\/|^\/codex-pets\/[^/]+\/spritesheet$|^\/asset-cache$/.test(pathname)
+    || /^\/design-systems\/[^/]+\/static(?:$|\/(?:workspaces\/[^/]+\/members\/[^/]+\/)?files\/)/.test(pathname)
+  );
+}
+
 export interface ParsedHostHeader {
   hostname: string;
   host: string;

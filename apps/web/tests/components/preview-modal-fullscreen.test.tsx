@@ -109,3 +109,19 @@ describe('PreviewModal fullscreen exit', () => {
     document.body.removeChild(other);
   });
 });
+
+
+describe('PreviewModal package document base', () => {
+  afterEach(cleanup);
+
+  it('preserves a scoped package URL through srcdoc construction', () => {
+    const baseHref = 'http://localhost/api/design-systems/user%3Ademo/static/workspaces/w/members/m/files/system/kit.html';
+    const { container } = render(<PreviewModal {...baseProps} onClose={() => {}}
+      views={[{ id: 'main', label: 'Main', html: '<link href="../tokens.css">', baseHref }]} />);
+    const documentHtml = container.querySelector('iframe')?.getAttribute('srcdoc') ?? '';
+    const preview = new DOMParser().parseFromString(documentHtml, 'text/html');
+    expect(preview.querySelector('base')?.getAttribute('href')).toBe(baseHref);
+    expect(new URL(preview.querySelector('link')!.getAttribute('href')!, baseHref).pathname)
+      .toBe('/api/design-systems/user%3Ademo/static/workspaces/w/members/m/files/tokens.css');
+  });
+});

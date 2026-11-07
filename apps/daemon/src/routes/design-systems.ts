@@ -818,6 +818,9 @@ export function registerDesignSystemRoutes(
       }
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Last-Modified', file.updatedAt);
+      if (req.headers.origin === 'null') {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+      }
       if (!canonical || (!pathScope && workspaceId && workspaceMemberId)) {
         res.redirect(designSystemStaticFileUrl(
           id,

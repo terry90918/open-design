@@ -3670,10 +3670,15 @@ export async function fetchDesignSystemPreview(
   }
 }
 
+export interface DesignSystemShowcaseDocument {
+  html: string;
+  baseHref: string;
+}
+
 export async function fetchDesignSystemShowcase(
   id: string,
   workspaceContext?: WorkspaceCollabContext | null,
-): Promise<string | null> {
+): Promise<DesignSystemShowcaseDocument | null> {
   try {
     const resp = await fetch(
       workspaceResourceUrl(
@@ -3683,7 +3688,7 @@ export async function fetchDesignSystemShowcase(
       workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : undefined,
     );
     if (!resp.ok) return null;
-    return await resp.text();
+    return { html: await resp.text(), baseHref: resp.url };
   } catch {
     return null;
   }

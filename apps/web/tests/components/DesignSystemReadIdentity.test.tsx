@@ -259,12 +259,15 @@ describe('design-system resource read identity', () => {
     ['showcase', registryMocks.fetchDesignSystemShowcase],
     ['tokens', registryMocks.fetchDesignSystemPreview],
   ] as const)('fences the modal lazy %s response by generation', async (viewId, fetchLazy) => {
-    const generationA = deferred<string | null>();
+    const generationA = deferred<string | { html: string; baseHref: string } | null>();
+    const documentFor = (generation: string) => viewId === 'showcase'
+      ? { html: `<!doctype html><p>${viewId} ${generation}</p>`, baseHref: `http://localhost/${generation.replaceAll(' ', '-')}/system/kit.html` }
+      : `<!doctype html><p>${viewId} ${generation}</p>`;
     let issuingGeneration = 'generation-a';
     registryMocks.fetchDesignSystem.mockResolvedValue({ ...SYSTEM, body: '# Stable detail' });
     registryMocks.fetchProjectFileText.mockResolvedValue(null);
     fetchLazy.mockImplementation(() => issuingGeneration === 'generation-b'
-      ? Promise.resolve(`<!doctype html><p>${viewId} generation B</p>`)
+      ? Promise.resolve(documentFor('generation B'))
       : generationA.promise);
 
     const view = render(
@@ -296,7 +299,7 @@ describe('design-system resource read identity', () => {
     });
 
     await act(async () => {
-      generationA.resolve(`<!doctype html><p>${viewId} generation A late</p>`);
+      generationA.resolve(documentFor('generation A late'));
       await Promise.resolve();
     });
     expect(document.querySelector('iframe')?.getAttribute('srcdoc')).toContain(`${viewId} generation B`);

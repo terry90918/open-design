@@ -3,8 +3,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createElement, type ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { WorkspaceCollabContext } from '@open-design/contracts';
+import type { InstalledPluginRecord, WorkspaceCollabContext } from '@open-design/contracts';
 
+import { PluginDesignSystemDetail } from '../../src/components/plugin-details/PluginDesignSystemDetail';
 import { DesignSystemPreviewModal } from '../../src/components/DesignSystemPreviewModal';
 import { I18nProvider } from '../../src/i18n';
 import type { DesignSystemSummary } from '../../src/types';
@@ -23,7 +24,7 @@ const {
     category: 'style',
     body: '# Claymorphism',
   })),
-  fetchDesignSystemShowcaseMock: vi.fn(async () => '<!doctype html><p>showcase</p>'),
+  fetchDesignSystemShowcaseMock: vi.fn(async () => ({ html: '<!doctype html><p>showcase</p>', baseHref: 'http://localhost/showcase' })),
   fetchProjectFileTextMock: vi.fn(async (_projectId: string, filePath: string) =>
     filePath === 'brand.json'
       ? JSON.stringify({
@@ -49,6 +50,7 @@ vi.mock('../../src/providers/registry', () => ({
   fetchDesignSystem: fetchDesignSystemMock,
   fetchDesignSystemPreview: vi.fn(async () => '<!doctype html><p>tokens</p>'),
   fetchDesignSystemShowcase: fetchDesignSystemShowcaseMock,
+  fetchPluginAssetText: vi.fn(async () => null),
   fetchProjectFileText: fetchProjectFileTextMock,
   openExternalUrl: vi.fn(),
   projectRawUrl: projectRawUrlMock,
@@ -109,11 +111,27 @@ function renderInsideStackingContext() {
 }
 
 describe('DesignSystemPreviewModal layering', () => {
+  it('retains the showcase base in the plugin detail consumer', async () => {
+    const record: InstalledPluginRecord = {
+      id: 'preview-base-plugin', title: 'Preview base', version: '1.0.0',
+      sourceKind: 'bundled', source: '/tmp', trust: 'bundled', capabilitiesGranted: [],
+      fsPath: '/tmp', installedAt: 0, updatedAt: 0,
+      manifest: { name: 'preview-base-plugin', version: '1.0.0', od: {
+        kind: 'scenario', mode: 'design-system', context: { designSystem: { ref: 'claymorphism' } },
+      } },
+    };
+    render(<I18nProvider initial="en"><PluginDesignSystemDetail record={record}
+      onClose={() => {}} onUse={() => {}} /></I18nProvider>);
+    await waitFor(() => {
+      expect(document.querySelector('iframe')?.getAttribute('srcdoc')).toContain('http://localhost/showcase');
+    });
+  });
+
   afterEach(() => {
     cleanup();
     document.body.innerHTML = '';
     fetchDesignSystemShowcaseMock.mockReset();
-    fetchDesignSystemShowcaseMock.mockResolvedValue('<!doctype html><p>showcase</p>');
+    fetchDesignSystemShowcaseMock.mockResolvedValue({ html: '<!doctype html><p>showcase</p>', baseHref: 'http://localhost/showcase' });
     fetchDesignSystemMock.mockClear();
     fetchProjectFileTextMock.mockClear();
     projectRawUrlMock.mockClear();
@@ -201,5 +219,6 @@ describe('DesignSystemPreviewModal layering', () => {
     });
     expect(screen.getByRole('tab', { name: 'Showcase' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('button', { name: 'Share' })).toBeTruthy();
+    expect(document.querySelector('iframe')?.getAttribute('srcdoc')).toContain('http://localhost/showcase');
   });
 });

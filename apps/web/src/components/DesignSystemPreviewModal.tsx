@@ -12,6 +12,7 @@ import {
   fetchDesignSystem,
   fetchDesignSystemPreview,
   fetchDesignSystemShowcase,
+  type DesignSystemShowcaseDocument,
 } from '../providers/registry';
 import type { DesignSystemDetail, DesignSystemSummary } from '../types';
 import { DesignSpecView } from './DesignSpecView';
@@ -74,7 +75,7 @@ export function DesignSystemPreviewModal({
     });
   }, [analytics.track, system.id, system.source]);
 
-  const [showcaseHtml, setShowcaseHtml] = useState<string | null | undefined>(undefined);
+  const [showcase, setShowcase] = useState<DesignSystemShowcaseDocument | null | undefined>(undefined);
   const [tokensHtml, setTokensHtml] = useState<string | null | undefined>(undefined);
   const [specBody, setSpecBody] = useState<string | null | undefined>(undefined);
   const [detail, setDetail] = useState<DesignSystemDetail | null | undefined>(
@@ -112,11 +113,11 @@ export function DesignSystemPreviewModal({
           });
         }
       }
-      if (viewId === 'showcase' && showcaseHtml === undefined) {
+      if (viewId === 'showcase' && showcase === undefined) {
         const read = beginWorkspaceResourceScopedRead(resourceReadIdentityRef.current);
-        setShowcaseHtml(null);
+        setShowcase(null);
         void fetchDesignSystemShowcase(system.id, read.context).then((html) => {
-          if (read.isStillCurrent(resourceReadIdentityRef.current)) setShowcaseHtml(html);
+          if (read.isStillCurrent(resourceReadIdentityRef.current)) setShowcase(html);
         });
       }
       if (viewId === 'tokens' && tokensHtml === undefined) {
@@ -127,7 +128,7 @@ export function DesignSystemPreviewModal({
         });
       }
     },
-    [analytics.track, system.id, system.source, showcaseHtml, tokensHtml, resourceReadIdentityKey],
+    [analytics.track, system.id, system.source, showcase, tokensHtml, resourceReadIdentityKey],
   );
 
   const handleSidebarToggle = useCallback(
@@ -149,7 +150,7 @@ export function DesignSystemPreviewModal({
   );
 
   useEffect(() => {
-    setShowcaseHtml(undefined);
+    setShowcase(undefined);
     setTokensHtml(undefined);
     setSpecBody(undefined);
   }, [system.id, resourceReadIdentityKey]);
@@ -173,7 +174,7 @@ export function DesignSystemPreviewModal({
             />
           ),
         },
-        { id: 'showcase', label: t('ds.showcase'), html: showcaseHtml },
+        { id: 'showcase', label: t('ds.showcase'), html: showcase?.html, baseHref: showcase?.baseHref },
         { id: 'tokens', label: t('ds.tokens'), html: tokensHtml },
       ]}
       initialViewId={initialViewId}

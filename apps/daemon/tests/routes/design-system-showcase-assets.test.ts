@@ -165,6 +165,23 @@ describe('design-system showcase route', () => {
     }
   });
 
+  it('allows sandboxed module reads without exposing other origins', async () => {
+    const app = express();
+    registerRoutes(app, null, {
+      'assets/main.mjs': { content: 'export const ready = true;', contentType: 'text/javascript' },
+    });
+    const baseUrl = await listen(app);
+    const url = `${baseUrl}/api/design-systems/bento/static?path=assets/main.mjs`;
+    const response = await fetch(url, { headers: { Origin: 'null' } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe('*');
+    expect(response.headers.get('access-control-allow-credentials')).toBeNull();
+    for (const headers of [{}, { Origin: 'https://example.com' }]) {
+      const other = await fetch(url, { headers });
+      expect(other.headers.get('access-control-allow-origin')).toBeNull();
+    }
+  });
+
   it('keeps the generated showcase fallback when no packaged kit exists', async () => {
     const app = express();
     registerRoutes(app, null);
