@@ -107,24 +107,6 @@ export function DesignSystemPreviewModal({
     };
   }, [system, resourceReadIdentityKey]);
 
-  useEffect(() => {
-    if (!showcase) return;
-    let cancelled = false;
-    const read = beginWorkspaceResourceScopedRead(resourceReadIdentityRef.current);
-    const timer = setTimeout(() => {
-      void fetchDesignSystemShowcase(system.id, read.context).then((next) => {
-        if (!cancelled && next && readScopeRef.current === readScope
-          && read.isStillCurrent(resourceReadIdentityRef.current)) {
-          setShowcase({ ...next });
-        }
-      }).catch(() => {});
-    }, 45 * 60_000);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [showcase, system.id, readScope]);
-
   const initialViewIdRef = useRef<string | null>(null);
   const handleView = useCallback(
     (viewId: string) => {

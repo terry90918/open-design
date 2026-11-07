@@ -13,7 +13,7 @@
 // upstream design system (some bundles ship DESIGN.md only): the
 // tabs collapse and the modal renders the spec sidebar by default.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type {
   InstalledPluginRecord,
   WorkspaceCollabContext,
@@ -109,22 +109,6 @@ export function PluginDesignSystemDetail({
     setTokensHtml(undefined);
     setSpecBody(undefined);
   }
-
-  useEffect(() => {
-    if (!showcase || !dsRef) return;
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      void fetchDesignSystemShowcase(dsRef, workspaceContext).then((next) => {
-        if (!cancelled && next && readScopeRef.current === readScope) {
-          setShowcase({ ...next });
-        }
-      }).catch(() => {});
-    }, 45 * 60_000);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [showcase, dsRef, workspaceContext, readScope]);
 
   const handleView = useCallback(
     (viewId: string) => {

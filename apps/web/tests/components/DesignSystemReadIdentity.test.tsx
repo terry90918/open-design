@@ -138,7 +138,6 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -418,76 +417,6 @@ describe('design-system resource read identity', () => {
     if (viewId === 'showcase') {
       expect(document.querySelector('iframe')?.getAttribute('srcdoc')).toContain('http://localhost/current-a/index.html');
     }
-  });
-
-  it.each(['modal', 'plugin'] as const)('renews %s showcase after 45 minutes and fences late refreshes', async (consumer) => {
-    vi.useFakeTimers();
-    const original = { html: '<p>Original document</p>', baseHref: 'http://localhost/lease/index.html' };
-    const lateRefresh = deferred<typeof original | null>();
-    const current = { html: '<p>Current workspace document</p>', baseHref: 'http://localhost/current/index.html' };
-    registryMocks.fetchDesignSystem.mockResolvedValue(null);
-    registryMocks.fetchProjectFileText.mockResolvedValue(null);
-    registryMocks.fetchPluginAssetText.mockResolvedValue(null);
-    registryMocks.fetchDesignSystemShowcase.mockResolvedValueOnce(original)
-      .mockResolvedValueOnce(original)
-      .mockImplementationOnce(() => lateRefresh.promise)
-      .mockResolvedValueOnce(current);
-    const contextB = workspaceContextFixture({ workspaceId: 'ws-refresh-b', workspaceMemberId: 'member-b', workspaceType: 'personal' });
-    const modal = (context: WorkspaceCollabContext) => (
-      <I18nProvider initial="en">
-        {consumer === 'modal'
-          ? <DesignSystemPreviewModal system={SYSTEM} workspaceContext={context} initialViewId="showcase" onClose={() => {}} />
-          : <PluginDesignSystemDetail record={PLUGIN} workspaceContext={context} onClose={() => {}} onUse={() => {}} />}
-      </I18nProvider>
-    );
-    const view = render(modal(CONTEXT));
-    await act(async () => {});
-    const frame = document.querySelector('iframe');
-    const initialSrcdoc = frame?.getAttribute('srcdoc');
-    expect(initialSrcdoc).toContain('Original document');
-    await act(async () => vi.advanceTimersByTimeAsync(45 * 60_000 - 1));
-    expect(registryMocks.fetchDesignSystemShowcase).toHaveBeenCalledTimes(1);
-    await act(async () => vi.advanceTimersByTimeAsync(1));
-    expect(registryMocks.fetchDesignSystemShowcase).toHaveBeenCalledTimes(2);
-    expect(document.querySelector('iframe')).toBe(frame);
-    expect(frame?.getAttribute('srcdoc')).toBe(initialSrcdoc);
-    await act(async () => vi.advanceTimersByTimeAsync(45 * 60_000));
-    expect(registryMocks.fetchDesignSystemShowcase).toHaveBeenCalledTimes(3);
-    expect(frame?.getAttribute('srcdoc')).toBe(initialSrcdoc);
-    view.rerender(modal(contextB));
-    await act(async () => {});
-    expect(registryMocks.fetchDesignSystemShowcase).toHaveBeenCalledTimes(4);
-    expect(registryMocks.fetchDesignSystemShowcase).toHaveBeenNthCalledWith(
-      4, consumer === 'modal' ? SYSTEM.id : 'system-scope', contextB,
-    );
-    await act(async () => lateRefresh.resolve({ ...original, html: '<p>Obsolete refresh</p>' }));
-    expect(document.querySelector('iframe')?.getAttribute('srcdoc')).toContain('Current workspace document');
-    view.unmount();
-    await act(async () => vi.advanceTimersByTimeAsync(45 * 60_000));
-    expect(registryMocks.fetchDesignSystemShowcase).toHaveBeenCalledTimes(4);
-  });
-
-  it.each(['modal', 'plugin'] as const)('retains the %s document when renewal fails without looping', async (consumer) => {
-    vi.useFakeTimers();
-    registryMocks.fetchDesignSystem.mockResolvedValue(null);
-    registryMocks.fetchProjectFileText.mockResolvedValue(null);
-    registryMocks.fetchPluginAssetText.mockResolvedValue(null);
-    registryMocks.fetchDesignSystemShowcase
-      .mockResolvedValueOnce({ html: '<p>Retained document</p>', baseHref: 'http://localhost/lease/index.html' })
-      .mockRejectedValueOnce(new Error('Refresh unavailable'));
-    render(
-      <I18nProvider initial="en">
-        {consumer === 'modal'
-          ? <DesignSystemPreviewModal system={SYSTEM} initialViewId="showcase" onClose={() => {}} />
-          : <PluginDesignSystemDetail record={PLUGIN} workspaceContext={CONTEXT} onClose={() => {}} onUse={() => {}} />}
-      </I18nProvider>,
-    );
-    await act(async () => {});
-    await act(async () => vi.advanceTimersByTimeAsync(45 * 60_000));
-    expect(registryMocks.fetchDesignSystemShowcase).toHaveBeenCalledTimes(2);
-    expect(document.querySelector('iframe')?.getAttribute('srcdoc')).toContain('Retained document');
-    await act(async () => vi.advanceTimersByTimeAsync(90 * 60_000));
-    expect(registryMocks.fetchDesignSystemShowcase).toHaveBeenCalledTimes(2);
   });
 
   it('retries an unchanged logo URL when the read generation advances', () => {

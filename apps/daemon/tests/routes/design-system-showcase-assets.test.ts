@@ -196,7 +196,8 @@ describe('design-system showcase route', () => {
     expect(new URL(entry.url).pathname).toMatch(/\/static\/previews\/[A-Za-z0-9_-]+\/files\/assets\/main\.mjs$/);
     const blocked = [
       [url, { Origin: 'null' }],
-      [url, { 'sec-fetch-dest': 'iframe', 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'same-origin' }],
+      [url, { 'sec-fetch-dest': 'iframe', 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'cross-site' }],
+      [url, { 'sec-fetch-dest': 'iframe', 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'same-site' }],
       [url, { 'sec-fetch-dest': 'document', 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'cross-site' }],
       [entry.url.replace('/bento/', '/other-package/'), { Origin: 'null' }],
       [entry.url.replace(/previews\/[^/]+/, 'previews/forged-scope'), { Origin: 'null' }],
@@ -213,6 +214,11 @@ describe('design-system showcase route', () => {
     expect((await fetch(injectedScope, { headers: { Origin: 'null' } })).status).toBe(400);
     expect((await fetch(entry.url, { headers: { 'x-od-workspace-id': 'other-workspace' } })).status).toBe(400);
     expect(entry.headers.get('referrer-policy')).toBe('no-referrer');
+    for (const destination of ['iframe', 'image', 'empty']) {
+      const hostRead = await fetch(url, { headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-dest': destination } });
+      expect(hostRead.status, destination).toBe(200);
+      expect(hostRead.url, destination).toBe(entry.url);
+    }
     const renewed = await fetch(url, { headers: { 'x-od-design-system-preview': '1', 'sec-fetch-site': 'same-origin', 'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors' } });
     expect(renewed.url).toBe(entry.url);
     const topLevel = await new Promise<number | undefined>((resolve, reject) => {
@@ -222,14 +228,11 @@ describe('design-system showcase route', () => {
       }).on('error', reject);
     });
     expect(topLevel).toBe(302);
-    const mintedAt = Date.now();
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(mintedAt + 50 * 60 * 1000);
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 24 * 60 * 60 * 1000);
     expect((await fetch(entry.url, { headers: { Origin: 'null' } })).status).toBe(200);
-    clock.mockReturnValue(mintedAt + 60 * 60 * 1000 + 1);
-    expect((await fetch(entry.url, { headers: { Origin: 'null' } })).status).toBe(403);
     const refreshed = await fetch(url);
     expect(refreshed.status).toBe(200);
-    expect(refreshed.url).not.toBe(entry.url);
+    expect(refreshed.url).toBe(entry.url);
   });
 
   it('rechecks allowed files on every scoped request', async () => {
@@ -244,6 +247,21 @@ describe('design-system showcase route', () => {
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
   });
 
+  it('bounds process-local capabilities and invalidates evicted scopes', async () => {
+    const app = express();
+    registerRoutes(app, null, { 'tokens.css': { content: 'body{}', contentType: 'text/css' } });
+    const baseUrl = await listen(app);
+    const first = await fetch(`${baseUrl}/api/design-systems/bento/static?path=tokens.css`);
+    for (let index = 0; index < 1024; index += 1) {
+      const entry = await fetch(`${baseUrl}/api/design-systems/package-${index}/static?path=tokens.css`, { redirect: 'manual' });
+      expect(entry.status).toBe(302);
+    }
+    expect((await fetch(first.url, { headers: { Origin: 'null' } })).status).toBe(403);
+    const reopened = await fetch(`${baseUrl}/api/design-systems/bento/static?path=tokens.css`);
+    expect(reopened.status).toBe(200);
+    expect(reopened.url).not.toBe(first.url);
+  });
+
   it('installs the existing storage shim before scripts on navigated HTML pages', async () => {
     const app = express();
     registerRoutes(app, null, {
@@ -252,6 +270,7 @@ describe('design-system showcase route', () => {
     const baseUrl = await listen(app);
     const response = await fetch(`${baseUrl}/api/design-systems/bento/static?path=pages/next.html`);
     const html = await response.text();
+    expect(response.headers.get('content-security-policy')).toBe('sandbox allow-scripts allow-forms allow-popups allow-downloads');
     expect(html).toContain('data-od-sandbox-shim');
     expect(html.indexOf('data-od-sandbox-shim')).toBeLessThan(html.indexOf('localStorage.setItem'));
   });

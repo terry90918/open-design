@@ -429,6 +429,19 @@ describe('Design System route family exact Workspace authority', () => {
     expect(response.status).toBe(403);
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
     expect(calls.static).not.toHaveBeenCalled();
+    updateWorkspaceResource(db, 'design_system', WORKSPACE_ID, DESIGN_SYSTEM_ID, { resourceState: 'active' });
+    expect((await fetch(entry.url, { headers: { Origin: 'null' } })).status).toBe(403);
+  });
+
+  it('invalidates issued preview scopes when deleting a package through its route', async () => {
+    const { baseUrl } = await startAuthorityServer({ visibility: 'personal' });
+    const url = `${baseUrl}/api/design-systems/${encodeURIComponent(DESIGN_SYSTEM_ID)}`;
+    const entry = await fetch(`${url}/static?path=tokens.css`, { headers: exactHeaders() });
+    expect(entry.status).toBe(200);
+    expect((await fetch(url, { method: 'DELETE', headers: exactHeaders() })).status).toBe(204);
+    const response = await fetch(entry.url, { headers: { Origin: 'null' } });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: 'DESIGN_SYSTEM_PREVIEW_SCOPE_INVALID' });
   });
 
   it('rejects bound mutations before their first side effect', async () => {

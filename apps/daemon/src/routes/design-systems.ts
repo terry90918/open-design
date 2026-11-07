@@ -233,7 +233,6 @@ export function registerDesignSystemRoutes(
     id: string;
     workspace: { workspaceId: string; workspaceMemberId: string } | null;
     exactTeam: boolean;
-    expiresAt: number;
   }>();
 
   function authorizePreviewEntry(req: Request, res: Response): boolean {
@@ -247,7 +246,7 @@ export function registerDesignSystemRoutes(
       && (site === 'none' || (site === 'same-origin' && req.get('sec-fetch-user') === '?1'));
     const nativeClient = !site && !dest && (!mode || mode === 'cors');
     if (origin === 'null' || site === 'cross-site'
-      || (!hostFetch && !userNavigation && !nativeClient)) {
+      || (site !== 'same-origin' && !hostFetch && !userNavigation && !nativeClient)) {
       res.status(403).json({ error: 'DESIGN_SYSTEM_PREVIEW_HOST_REQUIRED' });
       return false;
     }
@@ -259,21 +258,16 @@ export function registerDesignSystemRoutes(
     workspace: { workspaceId: string; workspaceMemberId: string } | null,
     exactTeam: boolean,
   ): string {
-    const now = Date.now();
-    for (const [scope, entry] of previewScopes) {
-      if (entry.expiresAt <= now) previewScopes.delete(scope);
-    }
     for (const [scope, entry] of previewScopes) {
       if (entry.id === id && entry.exactTeam === exactTeam
         && entry.workspace?.workspaceId === workspace?.workspaceId
         && entry.workspace?.workspaceMemberId === workspace?.workspaceMemberId) {
-        entry.expiresAt = now + 60 * 60 * 1000;
         return scope;
       }
     }
     if (previewScopes.size >= 1024) previewScopes.delete(previewScopes.keys().next().value!);
     const scope = randomUUID();
-    previewScopes.set(scope, { id, workspace, exactTeam, expiresAt: now + 60 * 60 * 1000 });
+    previewScopes.set(scope, { id, workspace, exactTeam });
     return scope;
   }
 
@@ -832,8 +826,7 @@ export function registerDesignSystemRoutes(
     try {
       const id = String(req.params.id);
       const scope = canonical ? previewScopes.get(String(req.params.scope)) : undefined;
-      if (canonical && (!scope || scope.id !== id || scope.expiresAt <= Date.now())) {
-        if (scope && scope.expiresAt <= Date.now()) previewScopes.delete(String(req.params.scope));
+      if (canonical && (!scope || scope.id !== id)) {
         res.status(403).json({ error: 'DESIGN_SYSTEM_PREVIEW_SCOPE_INVALID' });
         return;
       }
@@ -851,7 +844,10 @@ export function registerDesignSystemRoutes(
       const scopedRequest = pathScope
         ? { query: { ...req.query, ...pathScope }, get: req.get.bind(req) }
         : req;
-      if (!(await authorizeDesignSystemRead(scopedRequest, res, id, true))) return;
+      if (!(await authorizeDesignSystemRead(scopedRequest, res, id, true))) {
+        if (scope) previewScopes.delete(String(req.params.scope));
+        return;
+      }
       const workspaceId = headerValue(scopedRequest, 'x-od-workspace-id')
         ?? designSystemNavigationWorkspaceQuery(scopedRequest)?.workspaceId
         ?? null;
@@ -860,6 +856,7 @@ export function registerDesignSystemRoutes(
         ?? null;
       const storage = resolveDesignSystemStorage(scopedRequest, id, true);
       if (scope && scope.exactTeam !== storage.exactTeam) {
+        previewScopes.delete(String(req.params.scope));
         res.status(403).json({ error: 'DESIGN_SYSTEM_PREVIEW_SCOPE_INVALID' });
         return;
       }
@@ -894,6 +891,7 @@ export function registerDesignSystemRoutes(
       const content = file.contentType.startsWith('text/html')
         ? injectDesignSystemPreviewShim(file.bytes.toString('utf8'))
         : file.bytes;
+      res.setHeader('Content-Security-Policy', 'sandbox allow-scripts allow-forms allow-popups allow-downloads');
       res.type(file.contentType).send(content);
     } catch (err) {
       res.status(500).type('text/plain').send(String(err));
@@ -1084,6 +1082,9 @@ export function registerDesignSystemRoutes(
       // no ON DELETE CASCADE, so skipping this leaves an orphan row pointing
       // at a design system that no longer exists on disk.
       deleteWorkspaceResourceByResourceId(db, 'design_system', storage.bindingResourceId);
+      for (const [scope, entry] of previewScopes) {
+        if (entry.id === id) previewScopes.delete(scope);
+      }
       return true;
     } catch (err) {
       if (sendWorkspaceScopeError(res, err)) return false;
