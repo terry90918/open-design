@@ -751,14 +751,12 @@ export function registerDesignSystemRoutes(
         const workspaceQuery = designSystemNavigationWorkspaceQuery(req);
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('Last-Modified', packaged.updatedAt);
-        return res.type('text/html').send(
-          rewriteDesignSystemShowcaseAssetUrls(
-            packaged.bytes.toString('utf8'),
-            req.params.id,
-            path.posix.dirname(PACKAGED_SHOWCASE_PATH),
-            workspaceQuery,
-          ),
-        );
+        return res.redirect(designSystemStaticFileUrl(
+          req.params.id,
+          PACKAGED_SHOWCASE_PATH,
+          workspaceId && workspaceMemberId ? { workspaceId, workspaceMemberId } : workspaceQuery,
+          req,
+        ));
       }
       const body = await readAvailableDesignSystem(req.params.id, {
         workspaceId,
@@ -773,32 +771,75 @@ export function registerDesignSystemRoutes(
     }
   });
 
-  app.get('/api/design-systems/:id/static', async (req, res) => {
+  async function serveDesignSystemStaticFile(
+    req: Request,
+    res: Response,
+    canonical = false,
+  ): Promise<void> {
     try {
-      if (!(await authorizeDesignSystemRead(req, res, req.params.id, true))) return;
-      const workspaceId =
-        headerValue(req, 'x-od-workspace-id')
-        ?? designSystemNavigationWorkspaceQuery(req)?.workspaceId
+      const id = String(req.params.id);
+      const pathScope = req.params.workspaceId && req.params.workspaceMemberId
+        ? {
+            workspaceId: String(req.params.workspaceId).trim(),
+            workspaceMemberId: String(req.params.workspaceMemberId).trim(),
+          }
+        : null;
+      if (pathScope && (
+        !pathScope.workspaceId || !pathScope.workspaceMemberId
+        || Object.entries(pathScope).some(([key, value]) =>
+          req.query[key] !== undefined && req.query[key] !== value,
+        )
+      )) {
+        res.status(400).json({ error: 'WORKSPACE_CONTEXT_CONFLICT' });
+        return;
+      }
+      const scopedRequest = pathScope
+        ? { query: { ...req.query, ...pathScope }, get: req.get.bind(req) }
+        : req;
+      if (!(await authorizeDesignSystemRead(scopedRequest, res, id, true))) return;
+      const workspaceId = headerValue(scopedRequest, 'x-od-workspace-id')
+        ?? designSystemNavigationWorkspaceQuery(scopedRequest)?.workspaceId
         ?? null;
-      const workspaceMemberId =
-        headerValue(req, 'x-od-workspace-member-id')
-        ?? designSystemNavigationWorkspaceQuery(req)?.workspaceMemberId
+      const workspaceMemberId = headerValue(scopedRequest, 'x-od-workspace-member-id')
+        ?? designSystemNavigationWorkspaceQuery(scopedRequest)?.workspaceMemberId
         ?? null;
-      const storage = resolveDesignSystemStorage(req, req.params.id, true);
-      const requestedPath = typeof req.query.path === 'string' ? req.query.path : '';
+      const storage = resolveDesignSystemStorage(scopedRequest, id, true);
+      const requestedPath = canonical
+        ? (Array.isArray(req.params.filePath) ? req.params.filePath.join('/') : '')
+        : (typeof req.query.path === 'string' ? req.query.path : '');
       const file = await readAvailableDesignSystemStaticFile(
-        req.params.id,
+        id,
         requestedPath,
         { workspaceId, workspaceMemberId, exactTeam: storage.exactTeam },
       );
-      if (!file) return res.status(404).type('text/plain').send('not found');
+      if (!file) {
+        res.status(404).type('text/plain').send('not found');
+        return;
+      }
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Last-Modified', file.updatedAt);
+      if (!canonical || (!pathScope && workspaceId && workspaceMemberId)) {
+        res.redirect(designSystemStaticFileUrl(
+          id,
+          requestedPath,
+          workspaceId && workspaceMemberId ? { workspaceId, workspaceMemberId } : null,
+          req,
+        ));
+        return;
+      }
       res.type(file.contentType).send(file.bytes);
     } catch (err) {
       res.status(500).type('text/plain').send(String(err));
     }
-  });
+  }
+
+  app.get('/api/design-systems/:id/static', (req, res) => serveDesignSystemStaticFile(req, res));
+  app.get('/api/design-systems/:id/static/files/{*filePath}', (req, res) =>
+    serveDesignSystemStaticFile(req, res, true),
+  );
+  app.get('/api/design-systems/:id/static/workspaces/:workspaceId/members/:workspaceMemberId/files/{*filePath}', (req, res) =>
+    serveDesignSystemStaticFile(req, res, true),
+  );
 
   app.post('/api/design-systems/:id/workspace', async (req, res) => {
     try {
@@ -1049,72 +1090,21 @@ export function registerDesignSystemRoutes(
   return { authorizeDesignSystemRead, deleteDesignSystemForRequest };
 }
 
-export function rewriteDesignSystemShowcaseAssetUrls(
-  html: string,
+function designSystemStaticFileUrl(
   designSystemId: string,
-  baseDir: string,
-  workspaceQuery?: { workspaceId: string; workspaceMemberId: string } | null,
+  filePath: string,
+  workspace: { workspaceId: string; workspaceMemberId: string } | null,
+  req: Request,
 ): string {
-  if (!html) return html;
-  return html
-    .replace(/\b(src|href)=(["'])([^"']+)\2/gi, (match, attr: string, quote: string, raw: string) => {
-      const rewritten = rewriteDesignSystemShowcaseAssetUrl(
-        raw,
-        designSystemId,
-        baseDir,
-        workspaceQuery,
-      );
-      return rewritten === raw ? match : `${attr}=${quote}${rewritten}${quote}`;
-    })
-    .replace(/url\(\s*(["']?)([^"')]+)\1\s*\)/gi, (match, quote: string, raw: string) => {
-      const rewritten = rewriteDesignSystemShowcaseAssetUrl(
-        raw,
-        designSystemId,
-        baseDir,
-        workspaceQuery,
-      );
-      return rewritten === raw ? match : `url(${quote}${rewritten}${quote})`;
-    });
-}
-
-function rewriteDesignSystemShowcaseAssetUrl(
-  rawUrl: string,
-  designSystemId: string,
-  baseDir: string,
-  workspaceQuery?: { workspaceId: string; workspaceMemberId: string } | null,
-): string {
-  const value = rawUrl.trim();
-  if (
-    value.length === 0
-    || value.startsWith('#')
-    || value.startsWith('/')
-    || /^[a-z][a-z0-9+.-]*:/i.test(value)
-  ) {
-    return rawUrl;
-  }
-
-  const match = /^([^?#]+)([?#].*)?$/.exec(value);
-  if (!match) return rawUrl;
-  const [, rawPath, suffix = ''] = match;
-  if (!rawPath) return rawUrl;
-  const relativePath = path.posix.normalize(path.posix.join(baseDir, rawPath));
-  if (
-    relativePath === '.'
-    || relativePath.startsWith('../')
-    || path.posix.isAbsolute(relativePath)
-  ) {
-    return rawUrl;
-  }
-
-  const staticUrl =
-    `/api/design-systems/${encodeURIComponent(designSystemId)}/static`
-    + `?path=${encodeURIComponent(relativePath)}`
-    + (workspaceQuery
-      ? `&workspaceId=${encodeURIComponent(workspaceQuery.workspaceId)}`
-        + `&workspaceMemberId=${encodeURIComponent(workspaceQuery.workspaceMemberId)}`
-      : '');
-  if (suffix.startsWith('?')) return `${staticUrl}&${suffix.slice(1)}`;
-  return `${staticUrl}${suffix}`;
+  const scope = workspace
+    ? `workspaces/${encodeURIComponent(workspace.workspaceId)}/members/${encodeURIComponent(workspace.workspaceMemberId)}/`
+    : '';
+  const file = path.posix.normalize(filePath.trim().replace(/\\/g, '/'))
+    .split('/').map(encodeURIComponent).join('/');
+  const query = new URL(req.originalUrl, 'http://localhost').searchParams;
+  for (const key of ['path', 'workspaceId', 'workspaceMemberId']) query.delete(key);
+  const suffix = query.size ? `?${query}` : '';
+  return `/api/design-systems/${encodeURIComponent(designSystemId)}/static/${scope}files/${file}${suffix}`;
 }
 
 function designSystemNavigationWorkspaceQuery(

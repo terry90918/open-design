@@ -369,9 +369,9 @@ describe('Design System route family exact Workspace authority', () => {
 
     expect(showcase.status).toBe(200);
     expect(staticFile.status).toBe(200);
-    expect(await showcase.text()).toContain(
-      `path=assets%2Flogo.png&workspaceId=${WORKSPACE_ID}&workspaceMemberId=${MEMBER_ID}`,
-    );
+    expect(await showcase.text()).toContain('../assets/logo.png');
+    const logo = await fetch(new URL('../assets/logo.png', showcase.url));
+    expect(logo.status).toBe(200);
     expect(calls.static).toHaveBeenCalledWith(
       DESIGN_SYSTEM_ID,
       'system/kit.html',
@@ -383,6 +383,32 @@ describe('Design System route family exact Workspace authority', () => {
       { workspaceId: WORKSPACE_ID, workspaceMemberId: MEMBER_ID, exactTeam: false },
     );
     expect(verifyWorkspaceRequestAuthority).not.toHaveBeenCalled();
+  });
+
+  it('retains exact workspace identity for relative static requests after header-only entry', async () => {
+    const { baseUrl, calls } = await startAuthorityServer({ visibility: 'personal' });
+    const page = await fetch(
+      `${baseUrl}/api/design-systems/${encodeURIComponent(DESIGN_SYSTEM_ID)}/static?path=system%2Fkit.html`,
+      { headers: exactHeaders() },
+    );
+    expect(page.status).toBe(200);
+    const assetUrl = new URL('../assets/logo.png', page.url);
+    const asset = await fetch(assetUrl);
+    expect(asset.status).toBe(200);
+    expect(calls.static).toHaveBeenLastCalledWith(
+      DESIGN_SYSTEM_ID,
+      'assets/logo.png',
+      { workspaceId: WORKSPACE_ID, workspaceMemberId: MEMBER_ID, exactTeam: false },
+    );
+    const mismatchedHeader = await fetch(assetUrl, { headers: otherMemberHeaders() });
+    expect(mismatchedHeader.status).toBe(400);
+    const mismatchedQuery = new URL(assetUrl);
+    mismatchedQuery.searchParams.set('workspaceId', WORKSPACE_ID);
+    mismatchedQuery.searchParams.set('workspaceMemberId', 'member-b');
+    expect((await fetch(mismatchedQuery)).status).toBe(400);
+    const otherMember = new URL(assetUrl);
+    otherMember.pathname = otherMember.pathname.replace(MEMBER_ID, 'member-b');
+    expect((await fetch(otherMember)).status).toBe(403);
   });
 
   it('rejects bound mutations before their first side effect', async () => {
