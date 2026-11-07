@@ -3685,7 +3685,7 @@ export async function fetchDesignSystemShowcase(
         `/api/design-systems/${encodeURIComponent(id)}/showcase`,
         workspaceContext,
       ),
-      workspaceContext ? { headers: workspaceProjectHeaders(workspaceContext) } : undefined,
+      { headers: { ...(workspaceContext ? workspaceProjectHeaders(workspaceContext) : {}), 'x-od-design-system-preview': '1' } },
     );
     if (!resp.ok) return null;
     return { html: await resp.text(), baseHref: resp.url };

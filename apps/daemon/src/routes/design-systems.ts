@@ -1,6 +1,9 @@
 import type { Express, Request, Response } from 'express';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { buildPreviewSandboxShim } from '@open-design/contracts/runtime/preview-guards';
+import { endOfTag, findRealTagOffset, prependAfterDoctype } from '@open-design/contracts/runtime/html-injection-points';
 import type { RouteDeps } from '../server-context.js';
 import type {
   DesignSystemFileDetail,
@@ -226,6 +229,54 @@ export function registerDesignSystemRoutes(
     updateUserDesignSystemRevisionStatus,
   } = ctx.designSystems;
   const designSystemGenerationJobs = ctx.generationJobs;
+  const previewScopes = new Map<string, {
+    id: string;
+    workspace: { workspaceId: string; workspaceMemberId: string } | null;
+    exactTeam: boolean;
+    expiresAt: number;
+  }>();
+
+  function authorizePreviewEntry(req: Request, res: Response): boolean {
+    const origin = req.get('origin');
+    const site = req.get('sec-fetch-site');
+    const dest = req.get('sec-fetch-dest');
+    const mode = req.get('sec-fetch-mode');
+    const hostFetch = req.get('x-od-design-system-preview') === '1'
+      && (!dest || dest === 'empty');
+    const userNavigation = dest === 'document' && mode === 'navigate'
+      && (site === 'none' || (site === 'same-origin' && req.get('sec-fetch-user') === '?1'));
+    const nativeClient = !site && !dest && (!mode || mode === 'cors');
+    if (origin === 'null' || site === 'cross-site'
+      || (!hostFetch && !userNavigation && !nativeClient)) {
+      res.status(403).json({ error: 'DESIGN_SYSTEM_PREVIEW_HOST_REQUIRED' });
+      return false;
+    }
+    return true;
+  }
+
+  function mintPreviewScope(
+    id: string,
+    workspace: { workspaceId: string; workspaceMemberId: string } | null,
+    exactTeam: boolean,
+  ): string {
+    const now = Date.now();
+    for (const [scope, entry] of previewScopes) {
+      if (entry.expiresAt <= now) previewScopes.delete(scope);
+    }
+    for (const [scope, entry] of previewScopes) {
+      if (entry.id === id && entry.exactTeam === exactTeam
+        && entry.workspace?.workspaceId === workspace?.workspaceId
+        && entry.workspace?.workspaceMemberId === workspace?.workspaceMemberId) {
+        entry.expiresAt = now + 60 * 60 * 1000;
+        return scope;
+      }
+    }
+    if (previewScopes.size >= 1024) previewScopes.delete(previewScopes.keys().next().value!);
+    const scope = randomUUID();
+    previewScopes.set(scope, { id, workspace, exactTeam, expiresAt: now + 60 * 60 * 1000 });
+    return scope;
+  }
+
   const generationJobScopes = new Map<
     string,
     { workspaceId: string; workspaceMemberId: string } | null
@@ -732,6 +783,7 @@ export function registerDesignSystemRoutes(
 
   app.get('/api/design-systems/:id/showcase', async (req, res) => {
     try {
+      if (!authorizePreviewEntry(req, res)) return;
       if (!(await authorizeDesignSystemRead(req, res, req.params.id, true))) return;
       const workspaceId =
         headerValue(req, 'x-od-workspace-id')
@@ -748,13 +800,14 @@ export function registerDesignSystemRoutes(
         { workspaceId, workspaceMemberId, exactTeam: storage.exactTeam },
       );
       if (packaged?.contentType.startsWith('text/html')) {
-        const workspaceQuery = designSystemNavigationWorkspaceQuery(req);
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('Last-Modified', packaged.updatedAt);
+        res.setHeader('Referrer-Policy', 'no-referrer');
         return res.redirect(designSystemStaticFileUrl(
           req.params.id,
           PACKAGED_SHOWCASE_PATH,
-          workspaceId && workspaceMemberId ? { workspaceId, workspaceMemberId } : workspaceQuery,
+          mintPreviewScope(req.params.id, workspaceId && workspaceMemberId
+            ? { workspaceId, workspaceMemberId } : null, storage.exactTeam),
           req,
         ));
       }
@@ -778,18 +831,20 @@ export function registerDesignSystemRoutes(
   ): Promise<void> {
     try {
       const id = String(req.params.id);
-      const pathScope = req.params.workspaceId && req.params.workspaceMemberId
-        ? {
-            workspaceId: String(req.params.workspaceId).trim(),
-            workspaceMemberId: String(req.params.workspaceMemberId).trim(),
-          }
-        : null;
-      if (pathScope && (
-        !pathScope.workspaceId || !pathScope.workspaceMemberId
-        || Object.entries(pathScope).some(([key, value]) =>
-          req.query[key] !== undefined && req.query[key] !== value,
-        )
-      )) {
+      const scope = canonical ? previewScopes.get(String(req.params.scope)) : undefined;
+      if (canonical && (!scope || scope.id !== id || scope.expiresAt <= Date.now())) {
+        if (scope && scope.expiresAt <= Date.now()) previewScopes.delete(String(req.params.scope));
+        res.status(403).json({ error: 'DESIGN_SYSTEM_PREVIEW_SCOPE_INVALID' });
+        return;
+      }
+      if (!canonical && !authorizePreviewEntry(req, res)) return;
+      const pathScope = scope?.workspace ?? null;
+      if (canonical && ['workspaceId', 'workspaceMemberId'].some((key) => {
+        const expected = pathScope?.[key as keyof NonNullable<typeof pathScope>];
+        const header = req.get(key === 'workspaceId' ? 'x-od-workspace-id' : 'x-od-workspace-member-id');
+        return (req.query[key] !== undefined && req.query[key] !== expected)
+          || (header !== undefined && header !== expected);
+      })) {
         res.status(400).json({ error: 'WORKSPACE_CONTEXT_CONFLICT' });
         return;
       }
@@ -804,6 +859,10 @@ export function registerDesignSystemRoutes(
         ?? designSystemNavigationWorkspaceQuery(scopedRequest)?.workspaceMemberId
         ?? null;
       const storage = resolveDesignSystemStorage(scopedRequest, id, true);
+      if (scope && scope.exactTeam !== storage.exactTeam) {
+        res.status(403).json({ error: 'DESIGN_SYSTEM_PREVIEW_SCOPE_INVALID' });
+        return;
+      }
       const requestedPath = canonical
         ? (Array.isArray(req.params.filePath) ? req.params.filePath.join('/') : '')
         : (typeof req.query.path === 'string' ? req.query.path : '');
@@ -818,29 +877,31 @@ export function registerDesignSystemRoutes(
       }
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Last-Modified', file.updatedAt);
+      res.setHeader('Referrer-Policy', 'no-referrer');
       if (req.headers.origin === 'null') {
         res.setHeader('Access-Control-Allow-Origin', '*');
       }
-      if (!canonical || (!pathScope && workspaceId && workspaceMemberId)) {
+      if (!canonical) {
         res.redirect(designSystemStaticFileUrl(
           id,
           requestedPath,
-          workspaceId && workspaceMemberId ? { workspaceId, workspaceMemberId } : null,
+          mintPreviewScope(id, workspaceId && workspaceMemberId
+            ? { workspaceId, workspaceMemberId } : null, storage.exactTeam),
           req,
         ));
         return;
       }
-      res.type(file.contentType).send(file.bytes);
+      const content = file.contentType.startsWith('text/html')
+        ? injectDesignSystemPreviewShim(file.bytes.toString('utf8'))
+        : file.bytes;
+      res.type(file.contentType).send(content);
     } catch (err) {
       res.status(500).type('text/plain').send(String(err));
     }
   }
 
   app.get('/api/design-systems/:id/static', (req, res) => serveDesignSystemStaticFile(req, res));
-  app.get('/api/design-systems/:id/static/files/{*filePath}', (req, res) =>
-    serveDesignSystemStaticFile(req, res, true),
-  );
-  app.get('/api/design-systems/:id/static/workspaces/:workspaceId/members/:workspaceMemberId/files/{*filePath}', (req, res) =>
+  app.get('/api/design-systems/:id/static/previews/:scope/files/{*filePath}', (req, res) =>
     serveDesignSystemStaticFile(req, res, true),
   );
 
@@ -1093,21 +1154,27 @@ export function registerDesignSystemRoutes(
   return { authorizeDesignSystemRead, deleteDesignSystemForRequest };
 }
 
+function injectDesignSystemPreviewShim(html: string): string {
+  const shim = '<meta name="referrer" content="no-referrer">' + buildPreviewSandboxShim();
+  const head = findRealTagOffset(html, /<head(?=[\t\n\f\r />])/i);
+  const end = head >= 0 ? endOfTag(html, head) : -1;
+  return end >= 0
+    ? `${html.slice(0, end + 1)}${shim}${html.slice(end + 1)}`
+    : prependAfterDoctype(html, shim);
+}
+
 function designSystemStaticFileUrl(
   designSystemId: string,
   filePath: string,
-  workspace: { workspaceId: string; workspaceMemberId: string } | null,
+  scope: string,
   req: Request,
 ): string {
-  const scope = workspace
-    ? `workspaces/${encodeURIComponent(workspace.workspaceId)}/members/${encodeURIComponent(workspace.workspaceMemberId)}/`
-    : '';
   const file = path.posix.normalize(filePath.trim().replace(/\\/g, '/'))
     .split('/').map(encodeURIComponent).join('/');
   const query = new URL(req.originalUrl, 'http://localhost').searchParams;
   for (const key of ['path', 'workspaceId', 'workspaceMemberId']) query.delete(key);
   const suffix = query.size ? `?${query}` : '';
-  return `/api/design-systems/${encodeURIComponent(designSystemId)}/static/${scope}files/${file}${suffix}`;
+  return `/api/design-systems/${encodeURIComponent(designSystemId)}/static/previews/${encodeURIComponent(scope)}/files/${file}${suffix}`;
 }
 
 function designSystemNavigationWorkspaceQuery(

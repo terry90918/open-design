@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   closeDatabase,
   ensureWorkspaceResource,
+  updateWorkspaceResource,
   getWorkspaceResource,
   getWorkspaceResourceByResourceId,
   openDatabase,
@@ -408,10 +409,26 @@ describe('Design System route family exact Workspace authority', () => {
     mismatchedQuery.searchParams.set('workspaceMemberId', 'member-b');
     expect((await fetch(mismatchedQuery)).status).toBe(400);
     const otherMember = new URL(assetUrl);
-    otherMember.pathname = otherMember.pathname.replace(MEMBER_ID, 'member-b');
+    otherMember.searchParams.set('workspaceId', WORKSPACE_ID);
+    otherMember.searchParams.set('workspaceMemberId', 'member-b');
     const denied = await fetch(otherMember, { headers: { Origin: 'null' } });
-    expect(denied.status).toBe(403);
+    expect(denied.status).toBe(400);
     expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('rejects an issued preview scope after its package binding is deleted', async () => {
+    const { baseUrl, db, calls } = await startAuthorityServer({ visibility: 'personal' });
+    const entry = await fetch(
+      `${baseUrl}/api/design-systems/${encodeURIComponent(DESIGN_SYSTEM_ID)}/static?path=tokens.css`,
+      { headers: exactHeaders() },
+    );
+    expect(entry.status).toBe(200);
+    calls.static.mockClear();
+    updateWorkspaceResource(db, 'design_system', WORKSPACE_ID, DESIGN_SYSTEM_ID, { resourceState: 'deleted' });
+    const response = await fetch(entry.url, { headers: { Origin: 'null' } });
+    expect(response.status).toBe(403);
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    expect(calls.static).not.toHaveBeenCalled();
   });
 
   it('rejects bound mutations before their first side effect', async () => {

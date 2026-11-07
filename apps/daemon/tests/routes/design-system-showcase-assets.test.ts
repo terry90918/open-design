@@ -1,11 +1,12 @@
-import type http from 'node:http';
+import http from 'node:http';
 import express from 'express';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerDesignSystemRoutes } from '../../src/routes/design-systems.js';
 
 let server: http.Server | null = null;
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   if (!server) return;
   await new Promise<void>((resolve) => server?.close(() => resolve()));
   server = null;
@@ -149,7 +150,7 @@ describe('design-system showcase route', () => {
       mode: 'dark',
     })}`);
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe('<h1>Encoded</h1>');
+    expect(await response.text()).toContain('</script><h1>Encoded</h1>');
     expect(new URL(response.url).searchParams.get('mode')).toBe('dark');
     expect(decodeURIComponent(new URL(response.url).pathname)).toContain('/pages/色 彩#%.html');
   });
@@ -172,14 +173,87 @@ describe('design-system showcase route', () => {
     });
     const baseUrl = await listen(app);
     const url = `${baseUrl}/api/design-systems/bento/static?path=assets/main.mjs`;
-    const response = await fetch(url, { headers: { Origin: 'null' } });
+    const entry = await fetch(url);
+    const response = await fetch(entry.url, { headers: { Origin: 'null' } });
     expect(response.status).toBe(200);
     expect(response.headers.get('access-control-allow-origin')).toBe('*');
     expect(response.headers.get('access-control-allow-credentials')).toBeNull();
     for (const headers of [{}, { Origin: 'https://example.com' }]) {
-      const other = await fetch(url, { headers });
+      const other = await fetch(entry.url, { headers });
       expect(other.headers.get('access-control-allow-origin')).toBeNull();
     }
+  });
+
+  it('binds opaque-origin reads to a host-issued package capability', async () => {
+    const app = express();
+    registerRoutes(app, null, {
+      'assets/main.mjs': { content: 'export const secret = true;', contentType: 'text/javascript' },
+    });
+    const baseUrl = await listen(app);
+    const url = `${baseUrl}/api/design-systems/bento/static?path=assets/main.mjs`;
+    const entry = await fetch(url);
+    expect((await fetch(url, { headers: { Origin: 'null' }, redirect: 'manual' })).status).toBe(403);
+    expect(new URL(entry.url).pathname).toMatch(/\/static\/previews\/[A-Za-z0-9_-]+\/files\/assets\/main\.mjs$/);
+    const blocked = [
+      [url, { Origin: 'null' }],
+      [url, { 'sec-fetch-dest': 'iframe', 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'same-origin' }],
+      [url, { 'sec-fetch-dest': 'document', 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'cross-site' }],
+      [entry.url.replace('/bento/', '/other-package/'), { Origin: 'null' }],
+      [entry.url.replace(/previews\/[^/]+/, 'previews/forged-scope'), { Origin: 'null' }],
+    ] as const;
+    for (const [target, headers] of blocked) {
+      const response = await fetch(target, { headers, redirect: 'manual' });
+      expect(response.status, target).toBe(403);
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+      expect(await response.text()).not.toContain('export const secret');
+    }
+    const injectedScope = new URL(entry.url);
+    injectedScope.searchParams.set('workspaceId', 'other-workspace');
+    injectedScope.searchParams.set('workspaceMemberId', 'other-member');
+    expect((await fetch(injectedScope, { headers: { Origin: 'null' } })).status).toBe(400);
+    expect((await fetch(entry.url, { headers: { 'x-od-workspace-id': 'other-workspace' } })).status).toBe(400);
+    expect(entry.headers.get('referrer-policy')).toBe('no-referrer');
+    const renewed = await fetch(url, { headers: { 'x-od-design-system-preview': '1', 'sec-fetch-site': 'same-origin', 'sec-fetch-dest': 'empty', 'sec-fetch-mode': 'cors' } });
+    expect(renewed.url).toBe(entry.url);
+    const topLevel = await new Promise<number | undefined>((resolve, reject) => {
+      http.get(url, { headers: { 'sec-fetch-site': 'none', 'sec-fetch-dest': 'document', 'sec-fetch-mode': 'navigate' } }, (response) => {
+        response.resume();
+        resolve(response.statusCode);
+      }).on('error', reject);
+    });
+    expect(topLevel).toBe(302);
+    const mintedAt = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(mintedAt + 50 * 60 * 1000);
+    expect((await fetch(entry.url, { headers: { Origin: 'null' } })).status).toBe(200);
+    clock.mockReturnValue(mintedAt + 60 * 60 * 1000 + 1);
+    expect((await fetch(entry.url, { headers: { Origin: 'null' } })).status).toBe(403);
+    const refreshed = await fetch(url);
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.url).not.toBe(entry.url);
+  });
+
+  it('rechecks allowed files on every scoped request', async () => {
+    const app = express();
+    const files = { 'assets/main.mjs': { content: 'export const ready = true;', contentType: 'text/javascript' } };
+    registerRoutes(app, null, files);
+    const baseUrl = await listen(app);
+    const entry = await fetch(`${baseUrl}/api/design-systems/bento/static?path=assets/main.mjs`);
+    Reflect.deleteProperty(files, 'assets/main.mjs');
+    const response = await fetch(entry.url, { headers: { Origin: 'null' } });
+    expect(response.status).toBe(404);
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('installs the existing storage shim before scripts on navigated HTML pages', async () => {
+    const app = express();
+    registerRoutes(app, null, {
+      'pages/next.html': { content: '<!doctype html><html><head><script>localStorage.setItem("ready", "yes")</script></head></html>', contentType: 'text/html' },
+    });
+    const baseUrl = await listen(app);
+    const response = await fetch(`${baseUrl}/api/design-systems/bento/static?path=pages/next.html`);
+    const html = await response.text();
+    expect(html).toContain('data-od-sandbox-shim');
+    expect(html.indexOf('data-od-sandbox-shim')).toBeLessThan(html.indexOf('localStorage.setItem'));
   });
 
   it('keeps the generated showcase fallback when no packaged kit exists', async () => {

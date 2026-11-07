@@ -21,7 +21,7 @@ test('[P1] packaged static previews preserve sandboxed modules, CSS and nested n
     'tokens.css': ':root{--preview-color:rgb(18,35,69)}',
     'assets/main.css': '@import "./nested/theme.css"; h1{color:var(--preview-color)}',
     'assets/nested/theme.css': '@import "../../tokens.css";',
-    'assets/main.mjs': 'import { label } from "./nested/helper.mjs";const button=document.getElementById("ready");button.textContent=label;button.onclick=()=>button.textContent="Clicked";',
+    'assets/main.mjs': 'import { label } from "./nested/helper.mjs";const button=document.getElementById("ready");localStorage.setItem("initialized","yes");sessionStorage.setItem("initialized","yes");button.textContent=localStorage.getItem("initialized")==="yes"&&sessionStorage.getItem("initialized")==="yes"?label:"Storage failed";button.onclick=()=>button.textContent="Clicked";',
     'assets/nested/helper.mjs': 'export const label="Module ready";',
   };
   let passed = false;
@@ -34,7 +34,10 @@ test('[P1] packaged static previews preserve sandboxed modules, CSS and nested n
     expect(installed.ok(), await installed.text()).toBeTruthy();
     const { designSystem } = await installed.json();
     const staticPath = `/api/design-systems/${encodeURIComponent(designSystem.id)}/static?path=assets/main.mjs`;
-    const moduleResponse = await page.request.get(staticPath, { headers: { Origin: 'null' } });
+    const moduleEntry = await page.request.get(staticPath);
+    const moduleResponse = await page.request.get(moduleEntry.url(), { headers: { Origin: 'null' } });
+    const deniedMint = await page.request.get(staticPath, { headers: { Origin: 'null' } });
+    expect(deniedMint.status()).toBe(403);
     expect(moduleResponse.status()).toBe(200);
     expect(moduleResponse.headers()['access-control-allow-origin']).toBe('*');
     const deniedRead = await page.request.get(`/api/design-systems/${encodeURIComponent(designSystem.id)}/archive`, { headers: { Origin: 'null' } });
@@ -53,6 +56,14 @@ test('[P1] packaged static previews preserve sandboxed modules, CSS and nested n
     await expect(frame.getByRole('heading', { name: 'Nested page' })).toHaveCSS('color', 'rgb(18, 35, 69)');
     await frame.getByRole('link', { name: 'Back', exact: true }).click();
     await expect(frame.getByRole('heading', { name: 'Package showcase' })).toBeVisible();
+    const blockedNavigation = page.waitForResponse((response) => response.url().endsWith(staticPath));
+    await page.evaluate((url) => {
+      const frame = document.createElement('iframe');
+      frame.setAttribute('sandbox', 'allow-scripts');
+      frame.src = url;
+      document.body.append(frame);
+    }, staticPath);
+    expect((await blockedNavigation).status()).toBe(403);
     await testInfo.attach('static-preview-sandbox', { body: await page.screenshot(), contentType: 'image/png' });
     passed = true;
   } finally {

@@ -819,9 +819,8 @@ describe('configuredAllowedInternalHosts: OD_ALLOWED_INTERNAL_HOSTS parsing (iss
 
 describe('sandboxed design-system preview origin boundary', () => {
   it.each([
-    '/design-systems/user%3Ademo/static',
-    '/design-systems/user%3Ademo/static/files/assets/main.mjs',
-    '/design-systems/user%3Ademo/static/workspaces/w/members/m/files/fonts/a.woff2',
+    '/design-systems/user%3Ademo/static/previews/opaque-scope/files/assets/main.mjs',
+    '/design-systems/user%3Ademo/static/previews/opaque-scope/files/fonts/a.woff2',
   ])('permits only GET for %s', pathname => {
     expect(isSandboxedPreviewRead('GET', pathname)).toBe(true);
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
@@ -834,6 +833,9 @@ describe('sandboxed design-system preview origin boundary', () => {
     '/design-systems/demo/archive', '/design-systems/demo/sync-assets',
     '/design-systems/demo/showcase', '/design-systems/demo/static/other',
     '/design-systems/demo/static/workspaces/w/files/a.mjs',
+    '/design-systems/user%3Ademo/static',
+    '/design-systems/user%3Ademo/static/files/assets/main.mjs',
+    '/design-systems/user%3Ademo/static/workspaces/w/members/m/files/fonts/a.woff2',
   ])('does not widen sandbox access to %s', pathname => {
     expect(isSandboxedPreviewRead('GET', pathname)).toBe(false);
   });

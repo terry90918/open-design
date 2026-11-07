@@ -2611,10 +2611,13 @@ describe('design-system showcase document base', () => {
 
   it('retains the final scoped package URL for srcdoc consumers', async () => {
     const html = '<link rel="stylesheet" href="../tokens.css">';
-    const baseHref = 'http://localhost/api/design-systems/user%3Ademo/static/workspaces/w/members/m/files/system/kit.html';
+    const baseHref = 'http://localhost/api/design-systems/user%3Ademo/static/previews/opaque-scope/files/system/kit.html';
     const response = new Response(html);
     Object.defineProperty(response, 'url', { value: baseHref });
     vi.stubGlobal('fetch', vi.fn(async () => response));
     expect(await fetchDesignSystemShowcase('user:demo')).toEqual({ html, baseHref });
+    expect(fetch).toHaveBeenCalledWith('/api/design-systems/user%3Ademo/showcase', {
+      headers: { 'x-od-design-system-preview': '1' },
+    });
   });
 });

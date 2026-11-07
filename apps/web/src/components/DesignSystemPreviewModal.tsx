@@ -81,6 +81,17 @@ export function DesignSystemPreviewModal({
   const [detail, setDetail] = useState<DesignSystemDetail | null | undefined>(
     () => (isDesignSystemDetail(system) ? system : undefined),
   );
+  const scopeKey = JSON.stringify([system.id, resourceReadIdentityKey]);
+  const [readScope, setReadScope] = useState(() => ({ key: scopeKey }));
+  const readScopeRef = useRef(readScope);
+  readScopeRef.current = readScope;
+  if (readScope.key !== scopeKey) {
+    setReadScope({ key: scopeKey });
+    setShowcase(undefined);
+    setTokensHtml(undefined);
+    setSpecBody(undefined);
+    setDetail(isDesignSystemDetail(system) ? system : undefined);
+  }
   const detailBody = detail?.body ?? (isDesignSystemDetail(system) ? system.body : undefined);
 
   useEffect(() => {
@@ -95,6 +106,24 @@ export function DesignSystemPreviewModal({
       cancelled = true;
     };
   }, [system, resourceReadIdentityKey]);
+
+  useEffect(() => {
+    if (!showcase) return;
+    let cancelled = false;
+    const read = beginWorkspaceResourceScopedRead(resourceReadIdentityRef.current);
+    const timer = setTimeout(() => {
+      void fetchDesignSystemShowcase(system.id, read.context).then((next) => {
+        if (!cancelled && next && readScopeRef.current === readScope
+          && read.isStillCurrent(resourceReadIdentityRef.current)) {
+          setShowcase({ ...next });
+        }
+      }).catch(() => {});
+    }, 45 * 60_000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [showcase, system.id, readScope]);
 
   const initialViewIdRef = useRef<string | null>(null);
   const handleView = useCallback(
@@ -117,18 +146,22 @@ export function DesignSystemPreviewModal({
         const read = beginWorkspaceResourceScopedRead(resourceReadIdentityRef.current);
         setShowcase(null);
         void fetchDesignSystemShowcase(system.id, read.context).then((html) => {
-          if (read.isStillCurrent(resourceReadIdentityRef.current)) setShowcase(html);
+          if (readScopeRef.current === readScope && read.isStillCurrent(resourceReadIdentityRef.current)) {
+            setShowcase(html);
+          }
         });
       }
       if (viewId === 'tokens' && tokensHtml === undefined) {
         const read = beginWorkspaceResourceScopedRead(resourceReadIdentityRef.current);
         setTokensHtml(null);
         void fetchDesignSystemPreview(system.id, read.context).then((html) => {
-          if (read.isStillCurrent(resourceReadIdentityRef.current)) setTokensHtml(html);
+          if (readScopeRef.current === readScope && read.isStillCurrent(resourceReadIdentityRef.current)) {
+            setTokensHtml(html);
+          }
         });
       }
     },
-    [analytics.track, system.id, system.source, showcase, tokensHtml, resourceReadIdentityKey],
+    [analytics.track, system.id, system.source, showcase, tokensHtml, resourceReadIdentityKey, readScope],
   );
 
   const handleSidebarToggle = useCallback(
@@ -141,19 +174,13 @@ export function DesignSystemPreviewModal({
       const read = beginWorkspaceResourceScopedRead(resourceReadIdentityRef.current);
       setSpecBody(null);
       void fetchDesignSystem(system.id, read.context).then((nextDetail) => {
-        if (read.isStillCurrent(resourceReadIdentityRef.current)) {
+        if (readScopeRef.current === readScope && read.isStillCurrent(resourceReadIdentityRef.current)) {
           setSpecBody(nextDetail?.body ?? null);
         }
       });
     },
-    [detailBody, system.id, specBody, resourceReadIdentityKey],
+    [detailBody, system.id, specBody, resourceReadIdentityKey, readScope],
   );
-
-  useEffect(() => {
-    setShowcase(undefined);
-    setTokensHtml(undefined);
-    setSpecBody(undefined);
-  }, [system.id, resourceReadIdentityKey]);
 
   const modal = (
     <PreviewModal
