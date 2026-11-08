@@ -21,6 +21,14 @@
 // runtime.
 import { vi } from 'vitest';
 
+const beforeRequest = vi.hoisted(() => vi.fn<(
+  filter: { urls: string[] },
+  listener: (
+    details: { url: string; method: string; frame: { readonly origin: string } | null },
+    callback: (response: { cancel: boolean }) => void,
+  ) => void,
+) => void>());
+
 vi.mock('electron', () => ({
   // `registerOdProtocol` resolves its proxy fetch through `net.fetch`
   // (Chromium's network stack). Stubbed here so the registration tests can
@@ -28,7 +36,7 @@ vi.mock('electron', () => ({
   net: {
     fetch: vi.fn(),
   },
-  session: { defaultSession: { webRequest: { onBeforeRequest: vi.fn() } } },
+  session: { defaultSession: { webRequest: { onBeforeRequest: beforeRequest } } },
   protocol: {
     registerSchemesAsPrivileged: vi.fn(),
     handle: vi.fn(),
@@ -36,7 +44,7 @@ vi.mock('electron', () => ({
 }));
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { net, protocol, session } from 'electron';
+import { net, protocol } from 'electron';
 import { handleOdRequest, registerOdProtocol } from '../src/protocol.js';
 
 afterEach(() => {
@@ -911,20 +919,20 @@ describe('od:// protocol target resolution', () => {
 describe('packaged API initiator isolation', () => {
   it('fails closed when the browser frame has detached', () => {
     registerOdProtocol(() => 'http://127.0.0.1:61424/');
-    const listener = vi.mocked(session.defaultSession.webRequest.onBeforeRequest).mock.calls.at(-1)![1]!;
+    const listener = beforeRequest.mock.calls.at(-1)![1]!;
     const callback = vi.fn();
     listener({
       url: 'od://app/api/design-systems', method: 'GET',
-      frame: { get origin() { throw new Error('Frame detached'); } },
-    } as Electron.OnBeforeRequestListenerDetails, callback);
+      frame: { get origin(): string { throw new Error('Frame detached'); } },
+    }, callback);
     expect(callback).toHaveBeenCalledWith({ cancel: true });
   });
 
   it('does not proxy another custom-scheme authority into the app', () => {
     registerOdProtocol(() => 'http://127.0.0.1:61424/');
-    const listener = vi.mocked(session.defaultSession.webRequest.onBeforeRequest).mock.calls.at(-1)![1]!;
+    const listener = beforeRequest.mock.calls.at(-1)![1]!;
     const callback = vi.fn();
-    listener({ url: 'od://other/api/design-systems', method: 'GET', frame: { origin: 'od://app' } } as Electron.OnBeforeRequestListenerDetails, callback);
+    listener({ url: 'od://other/api/design-systems', method: 'GET', frame: { origin: 'od://app' } }, callback);
     expect(callback).toHaveBeenCalledWith({ cancel: true });
   });
 
@@ -948,11 +956,11 @@ describe('packaged API initiator isolation', () => {
     [undefined, 'GET', '/', false],
   ])('checks browser-owned origin %s for %s %s', async (origin, method, path, cancel) => {
     registerOdProtocol(() => 'http://127.0.0.1:61424/');
-    const call = vi.mocked(session.defaultSession.webRequest.onBeforeRequest).mock.calls.at(-1);
+    const call = beforeRequest.mock.calls.at(-1);
     expect(call).toBeDefined();
     const listener = call![1]!;
     const callback = vi.fn();
-    listener({ url: `od://app${path}`, method, frame: origin ? { origin } : null } as Electron.OnBeforeRequestListenerDetails, callback);
+    listener({ url: `od://app${path}`, method, frame: origin ? { origin } : null }, callback);
     expect(callback).toHaveBeenCalledWith({ cancel });
   });
 });
