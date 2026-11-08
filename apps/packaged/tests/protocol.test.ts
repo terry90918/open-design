@@ -44,6 +44,19 @@ afterEach(() => {
 });
 
 describe('od:// protocol proxy', () => {
+  it('preserves canonical content location when wrapping a followed redirect', async () => {
+    const location = '/api/design-systems/demo/static/previews/scope/files/system/kit.html';
+    const upstream = new Response('<h1>Preview</h1>', { headers: { 'Content-Location': location } });
+    Object.defineProperty(upstream, 'url', { value: `http://127.0.0.1:17579${location}` });
+    const response = await handleOdRequest(
+      new Request('od://app/api/design-systems/demo/showcase'),
+      'http://127.0.0.1:17579/',
+      async () => upstream,
+    );
+    expect(response.headers.get('content-location')).toBe(location);
+    expect(await response.text()).toBe('<h1>Preview</h1>');
+  });
+
   it('proxies the request through fetchImpl with the rewritten target URL', async () => {
     const captured: Request[] = [];
     const fetchImpl: typeof fetch = async (input) => {
