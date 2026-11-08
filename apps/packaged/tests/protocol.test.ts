@@ -970,8 +970,17 @@ describe('packaged preview response origin isolation', () => {
 
   it.each([
     '/api/projects/demo/raw/preview.html',
+    '/api/status',
+    '/api',
+    '/API/connectors/synthetic/callback',
+    '/api/plugins/synthetic/assets/preview.html',
     '/api/projects/demo/preview/preview.html',
     '/API/Projects/demo/Raw/preview.html',
+    '/artifacts/synthetic/index.html',
+    '/artifacts',
+    '/frames/synthetic/index.html',
+    '/api/plugin-previews/synthetic/index.html',
+    '/ARTIFACTS/synthetic/index.svg',
     '/api/design-systems/demo/static/previews/scope/files/preview.html',
   ])('keeps document responses opaque independently of iframe sandbox for %s', async path => {
     const response = await handleOdRequest(new Request(`od://app${path}`), 'http://127.0.0.1:17579/',
@@ -995,15 +1004,75 @@ describe('packaged preview response origin isolation', () => {
     },
   );
 
-  it('applies preview isolation after an internally followed redirect', async () => {
+  it.each([
+    '/api/projects/demo/raw/preview.html',
+    '/artifacts/synthetic/index.html',
+    '/frames/synthetic/index.html',
+    '/api/plugin-previews/synthetic/index.html',
+    '/api/status',
+  ])('applies preview isolation after an internally followed redirect to %s', async path => {
     const upstream = new Response('fixture');
     Object.defineProperty(upstream, 'url', {
-      value: 'http://127.0.0.1:17579/api/projects/demo/raw/preview.html',
+      value: `http://127.0.0.1:17579${path}`,
     });
     const response = await handleOdRequest(new Request('od://app/preview-alias'),
       'http://127.0.0.1:17579/', async () => upstream);
     expect(response.headers.get('content-security-policy')).toBe(sandbox);
     await response.text();
+  });
+
+  it('preserves JSON bodies and API response headers', async () => {
+    const response = await handleOdRequest(new Request('od://app/api/status'),
+      'http://127.0.0.1:17579/', async () => Response.json({ ready: true }, {
+        status: 202, headers: { 'cache-control': 'no-store', 'x-fixture': 'retained' },
+      }));
+    expect(await response.json()).toEqual({ ready: true });
+    expect(response.status).toBe(202);
+    expect(response.headers.get('content-type')).toBe('application/json');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('x-fixture')).toBe('retained');
+    expect(response.headers.get('content-security-policy')).toBe(sandbox);
+  });
+
+  it('preserves streamed API events without waiting for completion', async () => {
+    let upstreamController!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { upstreamController = controller; },
+    });
+    const response = await handleOdRequest(new Request('od://app/api/events'),
+      'http://127.0.0.1:17579/', async () => new Response(body, {
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+      }));
+    const reader = response.body!.getReader();
+    upstreamController.enqueue(new TextEncoder().encode('data: first\n\n'));
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe('data: first\n\n');
+    upstreamController.enqueue(new TextEncoder().encode('data: second\n\n'));
+    upstreamController.close();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe('data: second\n\n');
+    expect((await reader.read()).done).toBe(true);
+    expect(response.headers.get('content-type')).toBe('text/event-stream');
+    expect(response.headers.get('cache-control')).toBe('no-cache');
+    expect(response.headers.get('content-security-policy')).toBe(sandbox);
+  });
+
+  it('preserves binary API downloads and their disposition', async () => {
+    const bytes = new Uint8Array([0, 255, 17, 42]);
+    const response = await handleOdRequest(new Request('od://app/api/download'),
+      'http://127.0.0.1:17579/', async () => new Response(bytes, {
+        headers: { 'content-type': 'application/zip', 'content-disposition': 'attachment; filename="fixture.zip"' },
+      }));
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    expect(response.headers.get('content-disposition')).toBe('attachment; filename="fixture.zip"');
+    expect(response.headers.get('content-type')).toBe('application/zip');
+    expect(response.headers.get('content-security-policy')).toBe(sandbox);
+  });
+
+  it('retains callback HTML and permits scripts without granting a trusted origin', async () => {
+    const html = '<script>window.opener?.postMessage({type:"synthetic-callback"}, "*")</script>';
+    const response = await handleOdRequest(new Request('od://app/api/connectors/synthetic/callback'),
+      'http://127.0.0.1:17579/', async () => new Response(html, { headers: { 'content-type': 'text/html' } }));
+    expect(await response.text()).toBe(html);
+    expect(response.headers.get('content-security-policy')).toBe(sandbox);
   });
 
   it('preserves preview isolation on bodyless responses', async () => {
@@ -1012,8 +1081,9 @@ describe('packaged preview response origin isolation', () => {
     expect(response.headers.get('content-security-policy')).toBe(sandbox);
   });
 
-  it('does not sandbox the trusted app shell', async () => {
-    const response = await handleOdRequest(new Request('od://app/'),
+  it.each(['/', '/_next/static/app.js', '/artifacts-other', '/frames-other', '/api-other', '/projects/demo', '/design-systems'])(
+    'does not sandbox trusted app content outside static preview roots: %s', async path => {
+    const response = await handleOdRequest(new Request(`od://app${path}`),
       'http://127.0.0.1:17579/', async () => new Response('<main>App</main>'));
     expect(response.headers.get('content-security-policy')).toBeNull();
     await response.text();

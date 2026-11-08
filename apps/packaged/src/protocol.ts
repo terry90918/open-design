@@ -158,16 +158,8 @@ const defaultRetryDelay = (ms: number): Promise<void> =>
  *   - the returned body stream's cancel() (fired when the protocol consumer
  *     tears down) aborts the upstream too.
  */
-function isPreviewResponseUrl(value: string): boolean {
-  if (!value) return false;
-  const pathname = new URL(value).pathname.toLowerCase();
-  return pathname.startsWith("/api/") && isSandboxedPreviewRead("GET", pathname.slice(4));
-}
-
 /**
- * Two response-header repairs every proxied response needs:
- *
- * 1. Drop `content-encoding`/`content-length`/`transfer-encoding`. The
+ * Drop `content-encoding`/`content-length`/`transfer-encoding`. The
  *    main-process fetch has ALREADY decompressed the upstream body, but the
  *    stale headers ride along, so Chromium's renderer-side consumers that
  *    honor them (the font loader chief among them) try to gunzip plain
@@ -175,9 +167,6 @@ function isPreviewResponseUrl(value: string): boolean {
  *    packaged icon font rendered as tofu squares while plain fetch() of the
  *    same TTF returned 200 — the fetch path never re-decodes. Classic
  *    protocol.handle-proxy pitfall.
- * 2. Stamp `Access-Control-Allow-Origin: *`. Font loads are CORS-mode
- *    requests per the CSS Fonts spec; od:// is reachable only from this
- *    app's own renderer, so the wildcard leaks nothing.
  */
 function sanitizeProxyResponseHeaders(headers: Headers, requestUrl: string, responseUrl: string): Headers {
   const out = new Headers(headers);
@@ -185,10 +174,16 @@ function sanitizeProxyResponseHeaders(headers: Headers, requestUrl: string, resp
   out.delete("content-length");
   out.delete("transfer-encoding");
   out.set("Access-Control-Allow-Origin", "*");
-  if (isPreviewResponseUrl(requestUrl) || isPreviewResponseUrl(responseUrl)) {
+  if (isUntrustedDocumentResponseUrl(requestUrl) || isUntrustedDocumentResponseUrl(responseUrl)) {
     out.append("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-popups allow-downloads");
   }
   return out;
+}
+
+function isUntrustedDocumentResponseUrl(value: string): boolean {
+  if (!value) return false;
+  const pathname = new URL(value).pathname.toLowerCase();
+  return /^\/(?:api|artifacts|frames)(?:\/|$)/.test(pathname);
 }
 
 async function fetchOdTargetOnce(
