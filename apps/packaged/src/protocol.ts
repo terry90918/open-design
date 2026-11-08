@@ -158,6 +158,12 @@ const defaultRetryDelay = (ms: number): Promise<void> =>
  *   - the returned body stream's cancel() (fired when the protocol consumer
  *     tears down) aborts the upstream too.
  */
+function isPreviewResponseUrl(value: string): boolean {
+  if (!value) return false;
+  const pathname = new URL(value).pathname.toLowerCase();
+  return pathname.startsWith("/api/") && isSandboxedPreviewRead("GET", pathname.slice(4));
+}
+
 /**
  * Two response-header repairs every proxied response needs:
  *
@@ -173,12 +179,15 @@ const defaultRetryDelay = (ms: number): Promise<void> =>
  *    requests per the CSS Fonts spec; od:// is reachable only from this
  *    app's own renderer, so the wildcard leaks nothing.
  */
-function sanitizeProxyResponseHeaders(headers: Headers): Headers {
+function sanitizeProxyResponseHeaders(headers: Headers, requestUrl: string, responseUrl: string): Headers {
   const out = new Headers(headers);
   out.delete("content-encoding");
   out.delete("content-length");
   out.delete("transfer-encoding");
   out.set("Access-Control-Allow-Origin", "*");
+  if (isPreviewResponseUrl(requestUrl) || isPreviewResponseUrl(responseUrl)) {
+    out.append("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-popups allow-downloads");
+  }
   return out;
 }
 
@@ -221,7 +230,7 @@ async function fetchOdTargetOnce(
     return new Response(null, {
       status: upstream.status,
       statusText: upstream.statusText,
-      headers: sanitizeProxyResponseHeaders(upstream.headers),
+      headers: sanitizeProxyResponseHeaders(upstream.headers, request.url, upstream.url),
     });
   }
   const reader = upstream.body.getReader();
@@ -251,7 +260,7 @@ async function fetchOdTargetOnce(
   return new Response(body, {
     status: upstream.status,
     statusText: upstream.statusText,
-    headers: sanitizeProxyResponseHeaders(upstream.headers),
+    headers: sanitizeProxyResponseHeaders(upstream.headers, request.url, upstream.url),
   });
 }
 

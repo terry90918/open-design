@@ -964,3 +964,58 @@ describe('packaged API initiator isolation', () => {
     expect(callback).toHaveBeenCalledWith({ cancel });
   });
 });
+
+describe('packaged preview response origin isolation', () => {
+  const sandbox = 'sandbox allow-scripts allow-forms allow-popups allow-downloads';
+
+  it.each([
+    '/api/projects/demo/raw/preview.html',
+    '/api/projects/demo/preview/preview.html',
+    '/API/Projects/demo/Raw/preview.html',
+    '/api/design-systems/demo/static/previews/scope/files/preview.html',
+  ])('keeps document responses opaque independently of iframe sandbox for %s', async path => {
+    const response = await handleOdRequest(new Request(`od://app${path}`), 'http://127.0.0.1:17579/',
+      async () => new Response('<script>parent.postMessage(origin, "*")</script>', {
+        headers: { 'content-type': 'text/html' },
+      }));
+    expect(response.headers.get('content-security-policy')).toBe(sandbox);
+    expect(response.status).toBe(200);
+    await response.text();
+  });
+
+  it.each(['image/svg+xml', 'text/html', 'application/xhtml+xml', 'application/octet-stream'])(
+    'enforces an additional sandbox policy without replacing upstream CSP for %s', async contentType => {
+      const original = "default-src 'none'; sandbox allow-scripts allow-same-origin allow-popups-to-escape-sandbox";
+      const response = await handleOdRequest(new Request('od://app/api/projects/demo/raw/preview'),
+        'http://127.0.0.1:17579/', async () => new Response('fixture', {
+          headers: { 'content-type': contentType, 'content-security-policy': original },
+        }));
+      expect(response.headers.get('content-security-policy')).toBe(`${original}, ${sandbox}`);
+      expect(await response.text()).toBe('fixture');
+    },
+  );
+
+  it('applies preview isolation after an internally followed redirect', async () => {
+    const upstream = new Response('fixture');
+    Object.defineProperty(upstream, 'url', {
+      value: 'http://127.0.0.1:17579/api/projects/demo/raw/preview.html',
+    });
+    const response = await handleOdRequest(new Request('od://app/preview-alias'),
+      'http://127.0.0.1:17579/', async () => upstream);
+    expect(response.headers.get('content-security-policy')).toBe(sandbox);
+    await response.text();
+  });
+
+  it('preserves preview isolation on bodyless responses', async () => {
+    const response = await handleOdRequest(new Request('od://app/api/projects/demo/raw/preview.html'),
+      'http://127.0.0.1:17579/', async () => new Response(null, { status: 304 }));
+    expect(response.headers.get('content-security-policy')).toBe(sandbox);
+  });
+
+  it('does not sandbox the trusted app shell', async () => {
+    const response = await handleOdRequest(new Request('od://app/'),
+      'http://127.0.0.1:17579/', async () => new Response('<main>App</main>'));
+    expect(response.headers.get('content-security-policy')).toBeNull();
+    await response.text();
+  });
+});
