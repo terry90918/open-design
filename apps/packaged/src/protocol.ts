@@ -1,4 +1,5 @@
-import { net, protocol } from "electron";
+import { net, protocol, session } from "electron";
+import { isSandboxedPreviewRead } from "@open-design/contracts";
 
 const OD_SCHEME = "od";
 const OD_ENTRY_URL = `${OD_SCHEME}://app/`;
@@ -522,6 +523,19 @@ function resolveOdProxyFetch(isQuiesced: () => boolean = () => false): OdProtoco
  * address itself.
  */
 export function registerOdProtocol(resolveWebRuntimeUrl: OdProtocolTargetResolver): OdProtocolControl {
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ["od://*/*"] }, (details, callback) => {
+    let cancel = true;
+    try {
+      const url = new URL(details.url);
+      const apiPath = /^\/api(?=\/|$)/i.exec(url.pathname);
+      cancel = url.host !== "app" || (apiPath !== null
+        && details.frame?.origin !== "od://app"
+        && !isSandboxedPreviewRead(details.method, url.pathname.slice(apiPath[0].length)));
+    } catch {
+      cancel = true;
+    }
+    callback({ cancel });
+  });
   let quiesced = false;
   const activeControllers = new Set<AbortController>();
   const fetchImpl = resolveOdProxyFetch(() => quiesced);
