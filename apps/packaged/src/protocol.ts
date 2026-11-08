@@ -528,9 +528,10 @@ export function registerOdProtocol(resolveWebRuntimeUrl: OdProtocolTargetResolve
     try {
       const url = new URL(details.url);
       const apiPath = /^\/api(?=\/|$)/i.exec(url.pathname);
-      cancel = url.host !== "app" || (apiPath !== null
-        && details.frame?.origin !== "od://app"
-        && !isSandboxedPreviewRead(details.method, url.pathname.slice(apiPath[0].length)));
+      const ambiguousPath = /\\|\/{2,}|^\/[^/]*%/.test(url.pathname);
+      cancel = url.host !== "app" || (details.frame?.origin !== "od://app"
+        && (ambiguousPath || (apiPath !== null
+          && !isSandboxedPreviewRead(details.method, url.pathname.slice(apiPath[0].length)))));
     } catch {
       cancel = true;
     }

@@ -930,6 +930,11 @@ describe('packaged API initiator isolation', () => {
 
   it.each([
     ['null', 'GET', '/api/design-systems', true],
+    ['null', 'GET', '//api/design-systems', true],
+    ['null', 'POST', '//api/design-systems/install', true],
+    ['null', 'GET', String.raw`/\api/design-systems`, true],
+    ['null', 'GET', '/%61pi/design-systems', true],
+    ['null', 'POST', '/api%2fdesign-systems/install', true],
     ['null', 'POST', '/api/design-systems/install', true],
     ['null', 'GET', '/API/daemon/status', true],
     ['null', 'GET', '/api/design-systems/demo/static?path=preview.html', true],
